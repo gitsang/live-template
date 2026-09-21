@@ -24,7 +24,7 @@ services:
       LOG_LEVEL: '${LOG_LEVEL:-info}'
       # B 站登录态（可选）：留空为匿名，此时部分昵称会被 B 站打码。
       # 优先用文件方式：环境变量会出现在 docker inspect 与日志采集里。
-      BILI_COOKIE_FILE: '${BILI_COOKIE_FILE:-/secrets/bili-cookie.txt}'
+      BILI_COOKIE_FILE: '${BILI_COOKIE_FILE:-/run/secrets/bili-cookie.txt}'
       BILI_COOKIE: '${BILI_COOKIE:-}'
     volumes:
       # 弹幕归档持久化（重启后仍能回显）
