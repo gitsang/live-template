@@ -398,12 +398,22 @@ html.guide-on .slot {
 	inset: 0;
 	display: flex;
 	flex-direction: column;
-	justify-content: flex-end; /* 内容不足时贴底，超长时从顶部溢出 */
+	/*
+	 * 注意：这里不能用 justify-content: flex-end 来实现「内容不足时贴底」。
+	 * 在可滚动容器上，flex-end 会让溢出发生在顶部，且滚不到 —— 最早的几条
+	 * 弹幕会被永久裁掉（scrollHeight 等于 clientHeight，maxScrollTop 为 0）。
+	 * 正确做法是让第一行吃掉剩余空间：内容少时整体贴底，内容多时 margin 归零、
+	 * 正常向下溢出，滚动条能一直拉到最旧一条。
+	 */
 	overflow-y: auto;
 	overflow-x: hidden;
 	padding: 8px 10px;
 	scrollbar-width: thin;
 	scrollbar-color: rgba(94, 240, 138, 0.35) transparent;
+}
+
+.chat-list > .chat-row:first-child {
+	margin-top: auto;
 }
 
 .chat-list::-webkit-scrollbar {

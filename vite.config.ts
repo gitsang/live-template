@@ -1,6 +1,7 @@
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { danmakuDevPlugin } from './tools/vite-plugin-danmaku.ts';
 
 export default defineConfig({
 	plugins: [
@@ -14,6 +15,9 @@ export default defineConfig({
 			// Node adapter: needs a real Node process because the danmaku hub
 			// keeps long-lived WebSocket connections and appends to JSONL files.
 			adapter: adapter({ out: 'build' })
-		})
+		}),
+
+		/* dev 环境把 /ws 挂到 Vite 的 http server 上 */
+		danmakuDevPlugin()
 	]
 });
