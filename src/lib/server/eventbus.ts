@@ -8,7 +8,7 @@
  *
  * 每个房间一个实例，由 RoomHub 创建。
  */
-import type { DanmakuItem, StatusEvent } from '$lib/shared/types';
+import type { DanmakuInput, DanmakuItem, StatusEvent } from '$lib/shared/types';
 
 export type BusEvent = DanmakuItem | StatusEvent;
 
@@ -72,7 +72,7 @@ export class EventBus {
 	}
 
 	/** 发布弹幕/礼物，返回带 id 的完整事件 */
-	publish(event: Omit<DanmakuItem, 'id'>): DanmakuItem {
+	publish(event: DanmakuInput): DanmakuItem {
 		const id = this.#nextId++;
 		const full: DanmakuItem = { ...event, id } as DanmakuItem;
 

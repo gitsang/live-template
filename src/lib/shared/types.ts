@@ -51,6 +51,15 @@ export interface GiftEvent extends Base {
 
 export type DanmakuItem = DanmakuEvent | GiftEvent;
 
+/**
+ * 尚未分配事件 id 的条目。
+ *
+ * 注意必须写成两个 Omit 的联合，而不是 `Omit<DanmakuItem, 'id'>`：
+ * 后者作用在联合类型上会坍缩成各成员的**公共键**，弹幕独有的 m/lv 等
+ * 会被丢掉，导致 publish() 拒绝正确的输入。
+ */
+export type DanmakuInput = Omit<DanmakuEvent, 'id'> | Omit<GiftEvent, 'id'>;
+
 /** 房间连接状态 */
 export type RoomState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 

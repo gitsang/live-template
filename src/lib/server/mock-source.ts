@@ -6,9 +6,9 @@
  * 词表与 scripts/danmaku.py 的 demo 保持一致。
  */
 import { DEMO_LONG_TEXT, DEMO_TEXT, DEMO_USERS } from '$lib/shared/demo';
-import type { DanmakuEvent, GiftEvent } from '$lib/shared/types';
+import type { DanmakuInput } from '$lib/shared/types';
 
-export type MockEvent = Omit<DanmakuEvent, 'id'> | Omit<GiftEvent, 'id'>;
+export type MockEvent = DanmakuInput;
 
 /** 随机整数 [min, max] */
 function randInt(min: number, max: number): number {

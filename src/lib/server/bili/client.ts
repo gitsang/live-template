@@ -19,12 +19,12 @@ import {
 	type DanmuHost
 } from './api';
 import { OP, decode, encode, parseDanmakuInfo, type Packet } from './packet';
-import type { DanmakuEvent, GiftEvent } from '$lib/shared/types';
+import type { DanmakuInput } from '$lib/shared/types';
 import WebSocket from 'ws';
 import type { RawData } from 'ws';
 
 /** 未分配 id 的原始事件，id 由事件总线统一发放 */
-export type RawEvent = Omit<DanmakuEvent, 'id'> | Omit<GiftEvent, 'id'>;
+export type RawEvent = DanmakuInput;
 
 export interface DanmuClientEvents {
 	/** 收到一条可落盘的事件 */
