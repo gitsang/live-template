@@ -7,7 +7,7 @@
  *
  * 写入采用「排队 + 批量 flush」，避免每条弹幕都触发一次 fs 调用。
  */
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
@@ -194,15 +194,4 @@ async function tailLines(file: string, n: number): Promise<string[]> {
 		stream.destroy();
 	}
 	return ring;
-}
-
-/** 健康检查用：当天文件是否可读 */
-export async function statToday(dataDir: string, room: string): Promise<string | null> {
-	const file = join(roomDir(dataDir, room), `${localDateKey()}.jsonl`);
-	try {
-		const content = await readFile(file, 'utf8');
-		return `${file} (${content.length} bytes)`;
-	} catch {
-		return null;
-	}
 }

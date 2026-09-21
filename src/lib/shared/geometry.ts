@@ -133,13 +133,6 @@ export function panelSpec(name: BoxName): string {
 	return `${p.w}×${p.h} @ ${p.x},${p.y}`;
 }
 
-/** 四个框的强调色变量名，用于标题栏图标与糖果条 */
-export const ACCENT = {
-	video: '--cy',
-	notice: '--yl',
-	chat: '--gr',
-	pad: '--mg'
-} as const satisfies Record<BoxName, string>;
 
 /** 每个面板的外高，供 flex 布局使用 */
 export const OUTER_H = {
@@ -162,5 +155,4 @@ export function baseVars(): string {
 		`--bw:${BASE.bw}`
 	].join(';');
 }
-
 

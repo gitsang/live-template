@@ -6,7 +6,8 @@
 import type { RoomState } from './types';
 
 /**
- * 聊天框可见行数（由 geometry 的 474×630 与 16px/1.6 行高推得）。
+ * 聊天框可见行数：由内容区 630px 高、字体 16px / 行高 1.6（= 25.6px）推得，
+ * 约 23 行。仅作设计文档的数值留档，渲染不依赖它（靠容器高度自然裁剪）。
  * 见 docs/design.md §6.3。
  */
 export const VISIBLE_ROWS = 23;

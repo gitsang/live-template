@@ -311,5 +311,3 @@ export function attachDanmakuWs(
 	}
 	return wsServer;
 }
-
-export { send as sendToClient };

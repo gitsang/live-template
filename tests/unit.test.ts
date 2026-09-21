@@ -18,6 +18,13 @@ import { DanmakuStore, localDateKey } from '../src/lib/server/store.ts';
 import { EventBus } from '../src/lib/server/eventbus.ts';
 import { randomQueueUuid } from '../src/lib/server/bili/client.ts';
 import {
+	BASE,
+	BOXES,
+	PANELS,
+	CANVAS,
+	panelSpec
+} from '../src/lib/shared/geometry.ts';
+import {
 	STICK_BORDER,
 	STICK_DOT_SIZE,
 	STICK_MAX_TRAVEL,
@@ -197,6 +204,68 @@ test('randomQueueUuid 是 8 位小写字母数字', () => {
 test('randomQueueUuid 有足够随机性（连续两次不同）', () => {
 	const set = new Set(Array.from({ length: 100 }, () => randomQueueUuid()));
 	assert.ok(set.size > 90, `期望基本不重复，实际 ${set.size}/100`);
+});
+
+/* ==================== 版面几何 ==================== */
+
+test('内容区与外框尺寸关系自洽（外框 = 内容区 + 边框 + 标题栏）', () => {
+	for (const name of ['video', 'notice', 'chat', 'pad'] as const) {
+		const box = BOXES[name];
+		const panel = PANELS[name];
+		assert.equal(panel.w, box.w + BASE.bw * 2, `${name} 宽度关系`);
+		assert.equal(panel.h, box.h + BASE.hd + BASE.bw * 2, `${name} 高度关系`);
+	}
+});
+
+test('外框矩形与内容区矩形同心（只差边框与标题栏的偏移）', () => {
+	for (const name of ['video', 'notice', 'chat', 'pad'] as const) {
+		assert.equal(PANELS[name].x, BOXES[name].x - BASE.bw, `${name} x 偏移`);
+		assert.equal(PANELS[name].y, BOXES[name].y - BASE.bw - BASE.hd, `${name} y 偏移`);
+	}
+});
+
+test('关键尺寸与设计文档一致（OBS 里填的就是这些数）', () => {
+	/* 视频框严格 16:9 */
+	assert.equal(Math.round(BOXES.video.w), 1360);
+	assert.equal(Math.round(BOXES.video.h), 765);
+	assert.ok(Math.abs(BOXES.video.w / BOXES.video.h - 16 / 9) < 1e-9, '视频框必须是 16:9');
+
+	/* 聊天框 / 手柄框 */
+	assert.equal(Math.round(BOXES.chat.w), 474);
+	assert.equal(Math.round(BOXES.chat.h), 630);
+	assert.equal(Math.round(BOXES.pad.w), 474);
+	assert.equal(Math.round(BOXES.pad.h), 304);
+
+	/* 外框：OBS 浏览器源要填的宽高 */
+	assert.deepEqual(
+		['video', 'notice', 'chat', 'pad'].map((n) => `${PANELS[n as 'video'].w}×${PANELS[n as 'video'].h}`),
+		['1366×801', '1366×205', '480×666', '480×340']
+	);
+});
+
+test('左右两栏与画布高度完全吻合（布局不留缝隙）', () => {
+	const sceneH = CANVAS.h - BASE.pad * 2;
+	const leftH = PANELS.video.h + BASE.gap + PANELS.notice.h;
+	const rightH = PANELS.chat.h + BASE.gap + PANELS.pad.h;
+	assert.equal(leftH, sceneH, '左栏总高应等于场景高');
+	assert.equal(rightH, sceneH, '右栏总高应等于场景高');
+
+	const sceneW = CANVAS.w - BASE.pad * 2;
+	const leftW = PANELS.video.w;
+	const rightW = PANELS.chat.w;
+	assert.equal(leftW + BASE.gap + rightW, sceneW, '两栏加间距应等于场景宽');
+});
+
+test('panelSpec 生成可直接抄进 OBS 的描述', () => {
+	assert.equal(panelSpec('chat'), '480×666 @ 1412,28');
+	/* pad 在右栏聊天框之下：y = pad(28) + 聊天外框(666) + gap(18) = 712 */
+	assert.equal(panelSpec('pad'), '480×340 @ 1412,712');
+});
+
+test('聊天框可见行数约 23 行（16px / 行高 1.6）', () => {
+	const lineHeight = 16 * 1.6;
+	const rows = Math.floor((BOXES.chat.h - 16) / lineHeight); // 减去上下 padding
+	assert.equal(rows, 23);
 });
 
 /* ==================== 摇杆几何 ==================== */
