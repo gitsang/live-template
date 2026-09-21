@@ -1,0 +1,14 @@
+{
+	"port": 8080,
+	"host": "0.0.0.0",
+	"room": "90932",
+	"mock": false,
+	"hud": false,
+	"videoHole": true,
+	"labels": true,
+	"guides": false,
+	"dataDir": "./data",
+	"idleMs": 60000,
+	"echoCount": 10,
+	"logLevel": "info"
+}
