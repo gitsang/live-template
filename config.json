@@ -10,5 +10,6 @@
 	"dataDir": "./data",
 	"idleMs": 60000,
 	"echoCount": 10,
-	"logLevel": "info"
+	"logLevel": "info",
+	"biliCookie": ""
 }

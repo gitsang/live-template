@@ -27,3 +27,8 @@ vite.config.ts.timestamp-*
 
 # pi agent harness scratch
 /.pi
+
+# 登录态凭据：绝不入库
+/secrets
+*.cookie
+bili-cookie.txt

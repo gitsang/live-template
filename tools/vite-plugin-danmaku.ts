@@ -41,7 +41,8 @@ export function danmakuDevPlugin(): Plugin {
 				dataDir: config.dataDir,
 				idleMs: config.idleMs,
 				echoCount: config.echoCount,
-				mock: config.mock
+				mock: config.mock,
+				loginCookie: config.biliCookie
 			});
 
 			(globalThis as Record<symbol, unknown>)[HUB_KEY] = hub;

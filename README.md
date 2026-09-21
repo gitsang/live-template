@@ -155,6 +155,47 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
 | `idleMs`    | `IDLE_MS`    | `60000`   | 无人观看后断开 B 站的延时 |
 | `echoCount` | `ECHO_COUNT` | `10`      | 新页面回显条数            |
 | `logLevel`  | `LOG_LEVEL`  | `info`    | debug/info/warn/error     |
+| `biliCookie` | `BILI_COOKIE` / `BILI_COOKIE_FILE` | 空 | 见下方「登录态」 |
+
+---
+
+## 登录态（可选）
+
+不带登录态时，B 站会把**部分**弹幕的昵称打码成 `赛***`（实测约 2/3），
+并把对应的 `uid` 返回为 `0`。带上登录态 Cookie 能显著降低打码比例。
+
+> 无法保证 100% 消除：实测**同一个用户、同一房间**，有的消息给真实昵称、
+> 有的给打码昵称，这是 B 站在匿名连接上按消息隐藏的行为。
+> 好消息是 `user_hash` 始终稳定，所以用户名着色不受影响（见设计文档 §20.2）。
+
+### 配置
+
+```bash
+# 方式一（推荐）：从文件读取，可 chmod 600 且不进版本库
+mkdir -p secrets && printf '%s' 'SESSDATA=...; bili_jct=...; DedeUserID=...' > secrets/bili-cookie.txt
+chmod 600 secrets/bili-cookie.txt
+BILI_COOKIE_FILE=./secrets/bili-cookie.txt npm run dev
+
+# 方式二：环境变量（方便，但会出现在 docker inspect / 进程 environ / 日志采集里）
+BILI_COOKIE='SESSDATA=...; bili_jct=...; DedeUserID=...' npm run dev
+```
+
+Cookie 从浏览器开发者工具里复制（需含 `DedeUserID` 字段）。
+启动时会用 `nav` 接口**校验有效性**：
+
+- 校验通过 → 用真实 uid 连接，日志显示 `登录态有效 uid=...`
+- 校验不通过 → **降级为匿名连接**（不会让直播间连不上），并在日志与
+  `/api/health` 中告警，避免「以为自己登录了」
+
+容器的做法见 `compose.yml`：把 `./secrets` 只读挂进 `/run/secrets`。
+
+### 关于凭据安全
+
+- 唯一的日志出口是 `redactCookie()`：`SESSDATA` / `bili_jct` 等一律显示为 `***`，
+  `buvid` 只留前 8 位；`DedeUserID` 原样显示（公开 uid，便于排查登错号）。
+- 技术细节：弹幕服务器的认证包**只靠 `uid` 字段声称身份**，Cookie 并不会发给它
+  （只用于 HTTP API）。因此「已登录」是通过认证包里的真实 uid 表达的 ——
+  但也**不能只填 uid**：实测不带 Cookie 时填真实 uid 会被服务端直接断开。
 
 ---
 
@@ -248,6 +289,7 @@ curl -s localhost:8080/api/self-test     # 能看到测试弹幕 → 渲染链�
 **已实现**：
 
 - B 站弹幕实时采集、断线自动重连与补发、JSONL 归档与回显
+- 可选登录态连接（减少昵称打码）
 - 聊天框渲染：**弹幕 / 礼物 / 醒目留言（SC）** 三类，像素风皮肤
 - 用户名着色、粉丝牌、UL 等级、舰长徽章（房管 / 大会员标记）
 - 手柄全量键位显示（ABXY / 十字键 / 肩键 / 扳机模拟量 / 双摇杆 / View-Menu-Guide）

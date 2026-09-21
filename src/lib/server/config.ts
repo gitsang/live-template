@@ -4,7 +4,7 @@
  * 优先级：环境变量 > config.json > 内置默认值。
  * （URL 查询参数优先级最高，但只影响单个页面的视图开关，在 shared/view.ts 处理。）
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ViewOptions } from '$lib/shared/view';
 
@@ -33,6 +33,16 @@ export interface Config {
 	echoCount: number;
 	/** 日志级别 */
 	logLevel: 'debug' | 'info' | 'warn' | 'error';
+	/**
+	 * B 站登录态 Cookie。
+	 *
+	 * 留空即匿名连接，此时 B 站返回 `uid = 0` 且昵称被打码（`赛***`）。
+	 * 带上后弹幕服务器会还原真实昵称。
+	 *
+	 * ⚠️ 这是凭据，等效于账号登录态，**绝不要提交进仓库**。
+	 * 生产建议用 `BILI_COOKIE_FILE` 指向一个不进版本库的文件。
+	 */
+	biliCookie: string;
 }
 
 const DEFAULTS: Config = {
@@ -47,7 +57,8 @@ const DEFAULTS: Config = {
 	dataDir: './data',
 	idleMs: 60_000,
 	echoCount: 10,
-	logLevel: 'info'
+	logLevel: 'info',
+	biliCookie: ''
 };
 
 /** config.json 的字段形状（宽松，全部可选） */
@@ -110,7 +121,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		dataDir: str(env.DATA_DIR ?? file.dataDir, DEFAULTS.dataDir),
 		idleMs: num(env.IDLE_MS ?? file.idleMs, DEFAULTS.idleMs),
 		echoCount: num(env.ECHO_COUNT ?? file.echoCount, DEFAULTS.echoCount),
-		logLevel: str(env.LOG_LEVEL ?? file.logLevel, DEFAULTS.logLevel) as Config['logLevel']
+		logLevel: str(env.LOG_LEVEL ?? file.logLevel, DEFAULTS.logLevel) as Config['logLevel'],
+		biliCookie: resolveBiliCookie(env, file)
 	};
 
 	return cached;
@@ -132,4 +144,39 @@ export function toViewOptions(c: Config): ViewOptions {
 		mock: c.mock,
 		room: c.room
 	};
+}
+
+/**
+ * 取登录态 Cookie，优先级：BILI_COOKIE 环境变量 > BILI_COOKIE_FILE 文件 > config.json。
+ *
+ * 为什么要支持「从文件读」：环境变量会被 `docker inspect`、
+ * 进程列表（/proc/<pid>/environ）和日志采集系统看到，而 SESSDATA
+ * 一旦泄漏就等于账号被别人登录。文件可以单独 chmod 600 并排除在版本库外。
+ *
+ * 读取失败不抛错 —— 缺个可选凭据不该让服务起不来，降级为匿名并记一条告警。
+ */
+function resolveBiliCookie(env: NodeJS.ProcessEnv, file: FileConfig): string {
+	const inline = str(env.BILI_COOKIE, '');
+	if (inline) return inline;
+
+	const path = str(env.BILI_COOKIE_FILE, '');
+	if (path) {
+		const abs = resolve(path);
+		try {
+			if (!existsSync(abs)) {
+				console.warn(`[config] BILI_COOKIE_FILE 指向的文件不存在: ${abs}，按匿名连接`);
+				return '';
+			}
+			/* 浏览器复制出来的 Cookie 常带换行，统一压成一行 */
+			const raw = readFileSync(abs, 'utf8').trim().replace(/\s*\r?\n\s*/g, ' ');
+			if (raw) return raw;
+			console.warn(`[config] BILI_COOKIE_FILE 内容为空: ${abs}，按匿名连接`);
+			return '';
+		} catch (err) {
+			console.warn(`[config] 读取 BILI_COOKIE_FILE 失败: ${(err as Error).message}，按匿名连接`);
+			return '';
+		}
+	}
+
+	return str(file.biliCookie, '');
 }

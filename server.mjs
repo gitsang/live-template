@@ -22,7 +22,8 @@ const hub = new RoomHub({
 	dataDir: config.dataDir,
 	idleMs: config.idleMs,
 	echoCount: config.echoCount,
-	mock: config.mock
+	mock: config.mock,
+	loginCookie: config.biliCookie
 });
 
 /* 让 /api/health 能访问到同一个 hub 实例 */
@@ -35,6 +36,14 @@ server.listen(config.port, config.host, () => {
 	const mode = config.mock ? 'MOCK' : 'LIVE';
 	console.log(`[live-template] http://${config.host}:${config.port}`);
 	console.log(`[live-template] 房间=${config.room} 模式=${mode} 数据目录=${config.dataDir}`);
+	/*
+	 * 只说明「有没有配登录态」，绝不打印 Cookie 本身。
+	 * 注意这里不能断言「已登录」—— 此刻还没校验；凭据无效时会降级为匿名，
+	 * 真实结果由首次连接时的 nav 校验决定并另行告警。
+	 */
+	console.log(
+		`[live-template] 身份=${config.biliCookie ? '已配置登录态（连接时校验）' : '匿名（部分昵称会被打码）'}`
+	);
 	console.log('[live-template] OBS 浏览器源: /?hole=1  (1920x1080)');
 });
 

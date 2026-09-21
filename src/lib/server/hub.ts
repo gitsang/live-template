@@ -29,6 +29,8 @@ export interface RoomHubOptions {
 	echoCount: number;
 	/** 强制 mock（不连 B 站） */
 	mock: boolean;
+	/** B 站登录态 Cookie（可选，留空匿名） */
+	loginCookie?: string;
 }
 
 export class RoomSession {
@@ -117,6 +119,7 @@ export class RoomSession {
 	#runClient(): void {
 		const client = new DanmuClient({
 			room: this.room,
+			loginCookie: this.opt.loginCookie,
 			log: (msg, ...args) => log.debug(`[${this.room}] ${msg}`, ...args),
 			onStatus: (s) => {
 				/* 记录真实房间号，落盘目录与状态都改用它 */

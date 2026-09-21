@@ -22,8 +22,15 @@ services:
       # 视频框透明洞（默认开）：让 OBS 下方的显示器采集透出
       VIDEO_HOLE: '${VIDEO_HOLE:-1}'
       LOG_LEVEL: '${LOG_LEVEL:-info}'
+      # B 站登录态（可选）：留空为匿名，此时部分昵称会被 B 站打码。
+      # 优先用文件方式：环境变量会出现在 docker inspect 与日志采集里。
+      BILI_COOKIE_FILE: '${BILI_COOKIE_FILE:-/run/secrets/bili-cookie}'
+      BILI_COOKIE: '${BILI_COOKIE:-}'
     volumes:
       # 弹幕归档持久化（重启后仍能回显）
       - ./data:/app/data
+      # 登录态 Cookie 文件（可选）。放 ./secrets 下并 chmod 600，目录已 gitignore。
+      # 用 :ro 挂载，容器只读即可。
+      - ./secrets:/run/secrets:ro
     # 若 OBS 在宿主机、服务在容器内，用 host 网络可避免额外的端口映射问题
     # network_mode: host

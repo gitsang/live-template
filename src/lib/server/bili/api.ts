@@ -155,6 +155,40 @@ export function wbiSign(
 	return `${query}&w_rid=${w_rid}`;
 }
 
+/** 登录态校验结果 */
+export interface NavInfo {
+	/** 是否已登录。匿名请求返回 code=-101 / isLogin=false */
+	isLogin: boolean;
+	/** 登录用户 uid */
+	uid: number;
+	/** 登录用户昵称 */
+	uname: string;
+}
+
+/**
+ * 用 nav 接口校验 Cookie 是否为**有效登录态**。
+ *
+ * 为什么必须先校验：弹幕服务器的认证包只靠 uid 声称身份。实测在
+ * **不带 Cookie 的情况下填一个真实 uid**（如官方账号 2），服务端会直接以
+ * 1006 关闭连接且不回认证回应 —— 即「声称登录」必须有凭据支撑，
+ * 否则连匿名连接都不如。因此只有在 nav 确认 isLogin 后才敢用真实 uid。
+ *
+ * 匿名请求返回 `code = -101`、`isLogin = false`，不抛错。
+ */
+export async function getNavInfo(cookie: string): Promise<NavInfo> {
+	const res = await apiGet<{
+		code: number;
+		data?: { isLogin?: boolean; mid?: number; uname?: string };
+	}>(API.nav, cookie);
+
+	const data = res.data;
+	return {
+		isLogin: Boolean(data?.isLogin) && Number(data?.mid) > 0,
+		uid: Number(data?.mid) || 0,
+		uname: String(data?.uname ?? '')
+	};
+}
+
 /** 取 nav 里的 wbi 密钥 */
 async function getWbiKeys(cookie: string): Promise<{ imgKey: string; subKey: string }> {
 	const res = await apiGet<{
@@ -170,9 +204,14 @@ async function getWbiKeys(cookie: string): Promise<{ imgKey: string; subKey: str
 	return { imgKey: pick(wbi.img_url), subKey: pick(wbi.sub_url) };
 }
 
-/** 取弹幕服务器 token 与地址列表 */
-export async function getDanmuInfo(roomId: number, buvid: Buvid): Promise<DanmuInfo> {
-	const { imgKey, subKey } = await getWbiKeys(buvid.cookie);
+/**
+ * 取弹幕服务器 token 与地址列表。
+ *
+ * `cookie` 可以是匿名指纹，也可以是带登录态的完整 Cookie ——
+ * 后者能让 nav / getDanmuInfo 以登录身份请求（更容易通过风控）。
+ */
+export async function getDanmuInfo(roomId: number, cookie: string): Promise<DanmuInfo> {
+	const { imgKey, subKey } = await getWbiKeys(cookie);
 	const mixinKey = wbiMixinKey(imgKey, subKey);
 
 	/* dm_img_* 是风控参数，照抄网页端的固定值即可 */
@@ -195,7 +234,7 @@ export async function getDanmuInfo(roomId: number, buvid: Buvid): Promise<DanmuI
 		message?: string;
 		msg?: string;
 		data?: { token: string; host_list: RawHost[] };
-	}>(`${API.danmuInfo}?${query}`, buvid.cookie);
+	}>(`${API.danmuInfo}?${query}`, cookie);
 
 	if (res.code !== 0 || !res.data) {
 		throw new BiliApiError(

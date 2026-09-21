@@ -18,6 +18,19 @@ import { DanmakuStore, localDateKey } from '../src/lib/server/store.ts';
 import { EventBus } from '../src/lib/server/eventbus.ts';
 import { randomQueueUuid } from '../src/lib/server/bili/client.ts';
 import {
+	buildAuthPacket,
+	buvidFromCookie,
+	resolveAuth,
+	buildAuth,
+	cookieValue,
+	isMaskedName,
+	mergeCookies,
+	parseCookie,
+	redactCookie,
+	serializeCookie,
+	userIdFromCookie
+} from '../src/lib/server/bili/session.ts';
+import {
 	parseColor,
 	parseGift,
 	parseMedal,
@@ -473,6 +486,260 @@ test('parseSuperChat 丢弃无正文的消息', () => {
 	assert.equal(parseSuperChat({ price: 100, message: '' }, 1), null);
 	assert.equal(parseSuperChat({ price: 100 }, 1), null);
 	assert.equal(parseSuperChat(null, 1), null);
+});
+
+/* ==================== 登录态 Cookie ==================== */
+
+/* 假凭据：值本身不重要，重要的是任何输出里都不能出现完整值 */
+const REAL_SESSDATA = 'abcdef1234567890%2BxyzSECRET';
+const REAL_JCT = 'deadbeef0123456789CSRF';
+const LOGIN_COOKIE =
+	`SESSDATA=${REAL_SESSDATA}; bili_jct=${REAL_JCT}; DedeUserID=1557129; ` +
+	'DedeUserID__ckMd5=abcdef0123456789; buvid3=4B8559FC-5939-641B-6256-FCA6588EEC2329234infoc';
+
+test('parseCookie 解析键值并容忍脏输入', () => {
+	const m = parseCookie(`  a=1 ; b=2;  ; c ; =3 ; d="quoted" ; e=has=equals `);
+	assert.equal(m.a, '1');
+	assert.equal(m.b, '2');
+	assert.equal(m.c, undefined, '没有 = 的段应跳过');
+	assert.equal(m[''], undefined, '空名应跳过');
+	assert.equal(m.d, 'quoted', '应去掉两侧引号');
+	assert.equal(m.e, 'has=equals', '只按第一个 = 切分');
+});
+
+test('parseCookie 对空输入返回空对象', () => {
+	assert.deepEqual(parseCookie(''), {});
+	assert.deepEqual(parseCookie('   '), {});
+	assert.deepEqual(parseCookie(';;;'), {});
+});
+
+test('serializeCookie / parseCookie 往返一致', () => {
+	const raw = 'a=1; b=2; c=3';
+	assert.equal(serializeCookie(parseCookie(raw)), raw);
+	/* 空值字段应被丢弃，避免发出 `name=` 这种半截 Cookie */
+	assert.equal(serializeCookie({ a: '1', b: '' }), 'a=1');
+});
+
+test('mergeCookies 后者覆盖前者（用户凭据优先于匿名指纹）', () => {
+	/* 关键：用户自带的 buvid3 与他的 SESSDATA 属于同一次会话，必须优先 */
+	const merged = mergeCookies('buvid3=ANON; b_nut=1', 'buvid3=USER; SESSDATA=xyz');
+	assert.equal(cookieValue(merged, 'buvid3'), 'USER');
+	assert.equal(cookieValue(merged, 'b_nut'), '1', '未覆盖的字段应保留');
+	assert.equal(cookieValue(merged, 'SESSDATA'), 'xyz');
+});
+
+test('cookieValue 缺失时返回空串', () => {
+	assert.equal(cookieValue('a=1', 'nope'), '');
+	assert.equal(cookieValue('', 'a'), '');
+});
+
+test('userIdFromCookie 解析 DedeUserID', () => {
+	assert.equal(userIdFromCookie('DedeUserID=1557129'), 1557129);
+	assert.equal(userIdFromCookie('DedeUserID=1557129; SESSDATA=x'), 1557129);
+	/* 缺失或不合法时必须是 0（匿名），不能是 NaN —— NaN 会让认证包带上非法 uid */
+	assert.equal(userIdFromCookie(''), 0);
+	assert.equal(userIdFromCookie('SESSDATA=x'), 0);
+	assert.equal(userIdFromCookie('DedeUserID=0'), 0);
+	assert.equal(userIdFromCookie('DedeUserID=-5'), 0);
+	assert.equal(userIdFromCookie('DedeUserID=abc'), 0);
+});
+
+test('userIdFromCookie 在只有 ckMd5 时返回 0（不猜测 uid）', () => {
+	/*
+	 * DedeUserID__ckMd5 是 uid 的校验值，不是可逆编码；
+	 * 与其猜一个错误 uid 送进认证包，不如老实按匿名处理。
+	 */
+	assert.equal(userIdFromCookie('DedeUserID__ckMd5=17c1899abcdef01'), 0);
+});
+
+test('buvidFromCookie 取 buvid3', () => {
+	assert.equal(buvidFromCookie('buvid3=ABC; buvid4=DEF'), 'ABC');
+	assert.equal(buvidFromCookie('buvid4=DEF'), '');
+});
+
+test('buildAuth：匿名时 uid=0 且 authenticated=false', () => {
+	const auth = buildAuth({ anonymousCookie: 'buvid3=ANON; buvid4=B4; b_nut=1' });
+	assert.equal(auth.uid, 0);
+	assert.equal(auth.authenticated, false);
+	assert.equal(auth.buvid, 'ANON');
+	assert.match(auth.cookie, /buvid3=ANON/);
+});
+
+test('buildAuth：带登录态时解析出 uid 并标记已认证', () => {
+	const auth = buildAuth({ anonymousCookie: 'buvid3=ANON; b_nut=1', loginCookie: LOGIN_COOKIE });
+	assert.equal(auth.uid, 1557129);
+	assert.equal(auth.authenticated, true);
+	/* 用户的 buvid3 应覆盖匿名的 */
+	assert.equal(auth.buvid, '4B8559FC-5939-641B-6256-FCA6588EEC2329234infoc');
+	assert.match(auth.cookie, /SESSDATA=/);
+});
+
+test('buildAuth：配了 Cookie 但没有 DedeUserID 时退回匿名而不抛错', () => {
+	const auth = buildAuth({ anonymousCookie: 'buvid3=ANON', loginCookie: 'SESSDATA=only' });
+	assert.equal(auth.uid, 0);
+	assert.equal(auth.authenticated, false);
+	/* 但 Cookie 本身仍然带上：有些接口只看 SESSDATA */
+	assert.match(auth.cookie, /SESSDATA=only/);
+});
+
+test('buildAuth：空白 loginCookie 等同匿名', () => {
+	for (const v of ['', '   ', '\n']) {
+		const auth = buildAuth({ anonymousCookie: 'buvid3=ANON', loginCookie: v });
+		assert.equal(auth.authenticated, false, `loginCookie=${JSON.stringify(v)} 应为匿名`);
+	}
+});
+
+test('buildAuthPacket：匿名时 uid=0', () => {
+	const body = JSON.parse(
+		buildAuthPacket({ uid: 0, roomId: 90932, token: 'T', buvid: 'B', queueUuid: 'q1' })
+	);
+	assert.equal(body.uid, 0);
+	assert.equal(body.roomid, 90932);
+	assert.equal(body.key, 'T');
+	assert.equal(body.buvid, 'B');
+	assert.equal(body.protover, 3, '用 brotli');
+	assert.equal(body.platform, 'web');
+	assert.equal(body.scene, 'room');
+	assert.equal(body.support_ack, true);
+});
+
+test('buildAuthPacket：登录态时 uid 必须带上（否则昵称依旧打码）', () => {
+	/*
+	 * 这是匿名与登录唯一的差别。漏传不会有任何报错，
+	 * 表现只是「昵称还是打码的」，所以用断言钉住。
+	 */
+	const body = JSON.parse(
+		buildAuthPacket({ uid: 1557129, roomId: 1, token: 'T', buvid: 'B', queueUuid: 'q' })
+	);
+	assert.equal(body.uid, 1557129);
+});
+
+test('buildAuthPacket：queue_uuid 必须存在', () => {
+	/*
+	 * 不带 queue_uuid 时，同房间多条连接会被当成同一消费组被轮询分流，
+	 * 每条连接只拿到一部分弹幕（参考实现实测差约 8 倍）。
+	 */
+	const body = JSON.parse(
+		buildAuthPacket({ uid: 0, roomId: 1, token: 'T', buvid: 'B', queueUuid: 'abc12345' })
+	);
+	assert.equal(body.queue_uuid, 'abc12345');
+});
+
+test('buildAuthPacket 不含 Cookie（Cookie 只用于 HTTP API）', () => {
+	const raw = buildAuthPacket({
+		uid: 1557129,
+		roomId: 1,
+		token: 'T',
+		buvid: 'B',
+		queueUuid: 'q'
+	});
+	assert.ok(!raw.includes('SESSDATA'), '认证包不得携带 Cookie');
+});
+
+test('resolveAuth：校验通过时保留登录 uid', async () => {
+	const { auth, warning } = await resolveAuth({
+		anonymousCookie: 'buvid3=ANON',
+		loginCookie: LOGIN_COOKIE,
+		verify: async (cookie) => cookie.includes('SESSDATA=')
+	});
+	assert.equal(auth.uid, 1557129);
+	assert.equal(auth.authenticated, true);
+	assert.equal(warning, null);
+});
+
+test('resolveAuth：校验失败时降级为匿名并给出告警', async () => {
+	/*
+	 * 回归测试：实测在**不带 Cookie** 的情况下填一个真实 uid（官方账号 2），
+	 * 弹幕服务器会以 1006 直接断开且不回认证回应 —— 比匿名连接还糟。
+	 * 所以 Cookie 里能解析出 DedeUserID 并不等于服务端认可这个身份。
+	 */
+	const { auth, warning } = await resolveAuth({
+		anonymousCookie: 'buvid3=ANON',
+		loginCookie: LOGIN_COOKIE,
+		verify: async () => false
+	});
+	assert.equal(auth.uid, 0, '校验失败必须退回 uid=0');
+	assert.equal(auth.authenticated, false);
+	assert.ok(warning, '必须给出告警，否则使用者以为已登录');
+	assert.match(warning!, /过期|失效/);
+});
+
+test('resolveAuth：校验抛错也按失败处理，不向上抛', async () => {
+	const { auth, warning } = await resolveAuth({
+		anonymousCookie: 'buvid3=ANON',
+		loginCookie: LOGIN_COOKIE,
+		verify: async () => {
+			throw new Error('网络炸了');
+		}
+	});
+	assert.equal(auth.authenticated, false);
+	assert.ok(warning);
+});
+
+test('resolveAuth：匿名连接不调用校验（省一次请求）', async () => {
+	let called = false;
+	const { auth, warning } = await resolveAuth({
+		anonymousCookie: 'buvid3=ANON',
+		loginCookie: '',
+		verify: async () => {
+			called = true;
+			return true;
+		}
+	});
+	assert.equal(called, false);
+	assert.equal(auth.authenticated, false);
+	assert.equal(warning, null, '没配 Cookie 不该告警');
+});
+
+test('resolveAuth：无 verify 回调时不做校验（单测/离线场景）', async () => {
+	const { auth } = await resolveAuth({ anonymousCookie: 'buvid3=ANON', loginCookie: LOGIN_COOKIE });
+	assert.equal(auth.authenticated, true);
+});
+
+/* ---- 脱敏：这是安全相关的核心断言 ---- */
+
+test('redactCookie 绝不泄漏凭据原值', () => {
+	const out = redactCookie(LOGIN_COOKIE);
+	assert.ok(!out.includes(REAL_SESSDATA), 'SESSDATA 原值不得出现');
+	assert.ok(!out.includes(REAL_JCT), 'bili_jct 原值不得出现');
+	assert.match(out, /SESSDATA=\*\*\*/);
+	assert.match(out, /bili_jct=\*\*\*/);
+});
+
+test('redactCookie 保留公开 uid（排查登错号的关键线索）', () => {
+	const out = redactCookie(LOGIN_COOKIE);
+	assert.match(out, /DedeUserID=1557129/, 'uid 是公开信息，应可读');
+});
+
+test('redactCookie 对 buvid 只留前 8 位', () => {
+	const out = redactCookie(LOGIN_COOKIE);
+	assert.match(out, /buvid3=4B8559FC…/);
+	assert.ok(!out.includes('FCA6588EEC2329234infoc'), 'buvid 完整值不得出现');
+});
+
+test('redactCookie 覆盖各种凭据字段名（大小写不敏感）', () => {
+	for (const name of ['SESSDATA', 'sessdata', 'bili_jct', 'csrf', 'Sfa', 'sid', 'ckMd5']) {
+		const out = redactCookie(`${name}=SUPERSECRETVALUE`);
+		assert.ok(!out.includes('SUPERSECRETVALUE'), `${name} 未被脱敏: ${out}`);
+	}
+});
+
+test('redactCookie 对空 Cookie 给出可读结果', () => {
+	assert.equal(redactCookie(''), '(空)');
+});
+
+test('redactCookie 输出可以直接进日志（不含换行）', () => {
+	const out = redactCookie('a=1\nb=2');
+	assert.ok(!out.includes('\n'), '脱敏结果不应含换行，避免伪造日志行');
+});
+
+test('isMaskedName 识别 B 站的打码昵称', () => {
+	assert.equal(isMaskedName('赛***'), true);
+	assert.equal(isMaskedName('x***'), true);
+	assert.equal(isMaskedName('夜航船'), false);
+	assert.equal(isMaskedName(''), false);
+	/* 单个星号不算打码（真实昵称里可能有 *） */
+	assert.equal(isMaskedName('a*b'), false);
 });
 
 /* ==================== 聊天框配色与格式化 ==================== */
