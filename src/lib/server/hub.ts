@@ -242,6 +242,14 @@ export class RoomHub {
 		return this.#rooms.size;
 	}
 
+	/**
+	 * 取已存在的会话，不存在则返回 undefined（不创建）。
+	 * 自检接口用它注入测试弹幕，避免为了自检意外连上 B 站。
+	 */
+	peek(room: string): RoomSession | undefined {
+		return this.#rooms.get(room);
+	}
+
 	/** 健康检查快照 */
 	snapshot(): Array<{ room: string; refs: number; state: StatusEvent }> {
 		return [...this.#rooms.values()].map((s) => ({

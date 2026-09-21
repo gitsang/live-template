@@ -19,9 +19,11 @@
 		dimText?: string;
 		/** 用假输入序列替代真实手柄（无手柄的开发环境） */
 		mock?: boolean;
+		/** 撑满父容器（独立单框页用） */
+		fill?: boolean;
 	}
 
-	let { guides = false, dimText = '', mock = false }: Props = $props();
+	let { guides = false, dimText = '', mock = false, fill = false }: Props = $props();
 
 	const EMPTY: PadState = {
 		connected: false,
@@ -60,7 +62,7 @@
 	const rMag = $derived(Math.hypot(rx, ry));
 </script>
 
-<Panel variant="pad" accent="--mg" sprite="pad" en="GAMEPAD" cn="手柄操作框" {guides}>
+<Panel variant="pad" accent="--mg" sprite="pad" en="GAMEPAD" cn="手柄操作框" {guides} {fill}>
 	{#snippet dim()}
 		{state.connected ? (state.pressed ? '● 输入中' : '○ 待机') : ''}{dimText
 			? (state.connected ? ' · ' : '') + dimText

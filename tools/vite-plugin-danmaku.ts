@@ -29,6 +29,10 @@ export function danmakuDevPlugin(): Plugin {
 			const { setLogLevel } = await server.ssrLoadModule('/src/lib/server/logger.ts');
 			const { RoomHub } = await server.ssrLoadModule('/src/lib/server/hub.ts');
 			const { attachDanmakuWs } = await server.ssrLoadModule('/src/lib/server/ws-server.ts');
+			/* 直接用与 registry.ts 相同的 Symbol.for 键写入 globalThis，
+			   避免 ssrLoadModule 产生模块副本导致路由读到不同的实例 */
+			const HUB_KEY = Symbol.for('live-template.hub');
+			const START_KEY = Symbol.for('live-template.startTime');
 
 			const config = loadConfig();
 			setLogLevel(config.logLevel);
@@ -39,6 +43,9 @@ export function danmakuDevPlugin(): Plugin {
 				echoCount: config.echoCount,
 				mock: config.mock
 			});
+
+			(globalThis as Record<symbol, unknown>)[HUB_KEY] = hub;
+			(globalThis as Record<symbol, unknown>)[START_KEY] ??= Date.now();
 
 			const wsServer = attachDanmakuWs(httpServer, { hub, defaultRoom: config.room });
 

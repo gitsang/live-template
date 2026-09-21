@@ -7,7 +7,13 @@
  */
 import { createServer } from 'node:http';
 import { handler } from './build/handler.js';
-import { RoomHub, attachDanmakuWs, loadConfig, setLogLevel } from './build/danmaku/entry.js';
+import {
+	RoomHub,
+	attachDanmakuWs,
+	loadConfig,
+	registerHub,
+	setLogLevel
+} from './build/danmaku/entry.js';
 
 const config = loadConfig();
 setLogLevel(config.logLevel);
@@ -18,6 +24,9 @@ const hub = new RoomHub({
 	echoCount: config.echoCount,
 	mock: config.mock
 });
+
+/* 让 /api/health 能访问到同一个 hub 实例 */
+registerHub(hub);
 
 const server = createServer(handler);
 attachDanmakuWs(server, { hub, defaultRoom: config.room });

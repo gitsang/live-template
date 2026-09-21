@@ -8,13 +8,15 @@
 		dimText?: string;
 		/** 内容区插槽，公告框本期为空 */
 		children?: Snippet;
+		/** 撑满父容器（独立单框页用） */
+		fill?: boolean;
 	}
 
-	let { guides = false, dimText = '', children }: Props = $props();
+	let { guides = false, dimText = '', children, fill = false }: Props = $props();
 </script>
 
 <!-- 公告框：本期不做内容，仅保留框体与标题栏 -->
-<Panel variant="notice" accent="--yl" sprite="bell" en="NOTICE" cn="公告框" {guides}>
+<Panel variant="notice" accent="--yl" sprite="bell" en="NOTICE" cn="公告框" {guides} {fill}>
 	{#snippet dim()}{dimText}{/snippet}
 	{#if children}{@render children()}{/if}
 </Panel>

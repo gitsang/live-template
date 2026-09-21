@@ -308,7 +308,8 @@ html.label-off .hd .cn {
 
 /* 视频框透明洞：让 OBS 下方的显示器采集透出来。
    注意只作用于视频框，画布底纹与留白区保持不透明，游戏不会从缝隙漏出。 */
-html.hole-on .slot-video .body {
+html.hole-on .slot-video .body,
+.slot.slot-hole .body {
 	background: transparent;
 	box-shadow: none;
 }

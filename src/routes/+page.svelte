@@ -2,9 +2,10 @@
 	import Scene from '$lib/components/Scene.svelte';
 	import VideoBox from '$lib/components/VideoBox.svelte';
 	import NoticeBox from '$lib/components/NoticeBox.svelte';
-	import ChatPanel from '$lib/components/ChatPanel.svelte';
+	import ChatBox from '$lib/components/ChatBox.svelte';
 	import PadBox from '$lib/components/PadBox.svelte';
-	import { BOXES } from '$lib/shared/geometry';
+	import Hud from '$lib/components/Hud.svelte';
+	import { panelSpec } from '$lib/shared/geometry';
 	import { createDanmakuFeed, type DanmakuFeed } from '$lib/client/feed.svelte';
 	import { resolveViewOptions, type ViewOptions } from '$lib/shared/view';
 	import { page } from '$app/state';
@@ -30,8 +31,8 @@
 		return () => created.stop();
 	});
 
-	const dim = (k: keyof typeof BOXES): string =>
-		`${Math.round(BOXES[k].w)}×${Math.round(BOXES[k].h)}`;
+	/* 参考线模式下在标题栏显示 OBS 源应填的宽高与位置 */
+	const dim = panelSpec;
 </script>
 
 <Scene>
@@ -40,7 +41,7 @@
 		<NoticeBox guides={view.guides} dimText={dim('notice')} />
 	</div>
 	<div class="col-right">
-		<ChatPanel
+		<ChatBox
 			items={feed?.items ?? []}
 			live={feed?.status ?? { t: 'status', s: 'idle' }}
 			roomLabel={feed?.realRoom || view.room}
@@ -50,3 +51,12 @@
 		<PadBox mock={view.mock} guides={view.guides} dimText={dim('pad')} />
 	</div>
 </Scene>
+
+{#if view.hud}
+	<Hud
+		labels={view.labels}
+		guides={view.guides}
+		transparent={view.transparent}
+		hole={view.hole}
+	/>
+{/if}

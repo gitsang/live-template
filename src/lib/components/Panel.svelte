@@ -42,7 +42,8 @@
 		children
 	}: Props = $props();
 
-	const slotClass = $derived(['slot', `slot-${variant}`].join(' '));
+	/* hole 让本面板的内容区透明；整页模式用的是 html.hole-on（只作用于视频框） */
+	const slotClass = $derived(['slot', `slot-${variant}`, hole ? 'slot-hole' : ''].filter(Boolean).join(' '));
 
 	const slotStyle = $derived(
 		[

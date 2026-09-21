@@ -64,7 +64,7 @@ export const RIGHT_BODY_W = BASE.right - BASE.bw * 2;
 const CHAT_OUTER_H = BASE.h - BASE.pad * 2 - BASE.gap - BASE.padH;
 const PAD_OUTER_H = BASE.padH;
 
-/** 各内容区在画布中的精确位置 —— OBS 里按这些数值摆放/裁切采集源 */
+/** 各内容区在画布中的精确位置 —— 用于对齐显示器采集、坐标参考 */
 export const BOXES = {
 	video: {
 		x: BASE.pad + BASE.bw,
@@ -94,6 +94,45 @@ export const BOXES = {
 
 export type BoxName = keyof typeof BOXES;
 
+/**
+ * 各面板的**外框**矩形（含边框与标题栏）。
+ *
+ * 这是 OBS 里该填的数值：`/only/<box>` 页渲染的是完整面板，
+ * 所以浏览器源的宽高与位置应照这里填，叠在整页画布上才能像素级对齐。
+ */
+export const PANELS = {
+	video: {
+		x: BOXES.video.x - BASE.bw,
+		y: BOXES.video.y - BASE.bw - BASE.hd,
+		w: BOXES.video.w + BASE.bw * 2,
+		h: VIDEO_OUTER_H
+	},
+	notice: {
+		x: BOXES.notice.x - BASE.bw,
+		y: BOXES.notice.y - BASE.bw - BASE.hd,
+		w: BOXES.notice.w + BASE.bw * 2,
+		h: NOTICE_OUTER_H
+	},
+	chat: {
+		x: BOXES.chat.x - BASE.bw,
+		y: BOXES.chat.y - BASE.bw - BASE.hd,
+		w: BOXES.chat.w + BASE.bw * 2,
+		h: CHAT_OUTER_H
+	},
+	pad: {
+		x: BOXES.pad.x - BASE.bw,
+		y: BOXES.pad.y - BASE.bw - BASE.hd,
+		w: BOXES.pad.w + BASE.bw * 2,
+		h: PAD_OUTER_H
+	}
+} as const satisfies Record<string, Box>;
+
+/** `OBS 源 WxH @ x,y` 文本，写入标题栏便于抄写 */
+export function panelSpec(name: BoxName): string {
+	const p = PANELS[name];
+	return `${p.w}×${p.h} @ ${p.x},${p.y}`;
+}
+
 /** 四个框的强调色变量名，用于标题栏图标与糖果条 */
 export const ACCENT = {
 	video: '--cy',
@@ -101,6 +140,14 @@ export const ACCENT = {
 	chat: '--gr',
 	pad: '--mg'
 } as const satisfies Record<BoxName, string>;
+
+/** 每个面板的外高，供 flex 布局使用 */
+export const OUTER_H = {
+	video: VIDEO_OUTER_H,
+	notice: NOTICE_OUTER_H,
+	chat: CHAT_OUTER_H,
+	pad: PAD_OUTER_H
+} as const;
 
 /** 渲染成内联 CSS 自定义属性，供 theme.css 使用 */
 export function baseVars(): string {
@@ -116,10 +163,4 @@ export function baseVars(): string {
 	].join(';');
 }
 
-/** 每个面板的外高，供 flex 布局使用 */
-export const OUTER_H = {
-	video: VIDEO_OUTER_H,
-	notice: NOTICE_OUTER_H,
-	chat: CHAT_OUTER_H,
-	pad: PAD_OUTER_H
-} as const;
+

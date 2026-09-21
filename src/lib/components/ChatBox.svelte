@@ -9,13 +9,31 @@
 	 * - DOM 上限 300 条，超出移除最旧
 	 * - 追加/裁剪时用 FLIP 位移动画，保证既有条目平滑上移而不跳变
 	 */
-	import type { DanmakuEvent } from '$lib/shared/types';
+	import Panel from './Panel.svelte';
+	import { STATE_TEXT } from '$lib/shared/chat';
+	import type { DanmakuEvent, StatusEvent } from '$lib/shared/types';
 
 	interface Props {
 		items: DanmakuEvent[];
+		/** 连接状态，用于标题栏指示灯 */
+		live?: StatusEvent;
+		/** 真实房间号 */
+		roomLabel?: string;
+		guides?: boolean;
+		/** 尺寸标注，仅参考线模式显示 */
+		dimText?: string;
+		/** 撑满父容器（独立单框页用） */
+		fill?: boolean;
 	}
 
-	let { items }: Props = $props();
+	let {
+		items,
+		live = { t: 'status', s: 'idle' },
+		roomLabel = '',
+		guides = false,
+		dimText = '',
+		fill = false
+	}: Props = $props();
 
 	/** DOM 中最多保留的行数 */
 	const MAX_DOM = 300;
@@ -69,15 +87,24 @@
 	});
 </script>
 
-<div class="chat-list" bind:this={listEl}>
-	{#each visible as item (item.id)}
-		<div class="chat-row in" data-id={item.id}>
-			<span class="chat-user">{item.u}</span>
-			<span class="chat-text">{item.m}</span>
-		</div>
-	{/each}
+<Panel variant="chat" accent="--gr" sprite="bubble" en="CHAT" cn="聊天框" {guides} {fill}>
+	{#snippet status()}
+		<span class="status status-{live.s}">
+			<span class="status-dot"></span>{roomLabel ? `${roomLabel} · ` : ''}{STATE_TEXT[live.s]}
+		</span>
+	{/snippet}
+	{#snippet dim()}{dimText}{/snippet}
+
+	<div class="chat-list" bind:this={listEl}>
+		{#each visible as item (item.id)}
+			<div class="chat-row in" data-id={item.id}>
+				<span class="chat-user">{item.u}</span>
+				<span class="chat-text">{item.m}</span>
+			</div>
+		{/each}
 </div>
 
-{#if visible.length === 0}
-	<div class="chat-empty">等待弹幕…</div>
-{/if}
+	{#if visible.length === 0}
+		<div class="chat-empty">等待弹幕…</div>
+	{/if}
+</Panel>
