@@ -163,12 +163,14 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
 按天分文件、逐行 JSON：`data/room-<房间号>/YYYY-MM-DD.jsonl`
 
 ```jsonc
+// 弹幕
 {
   "t": "danmaku",
   "id": 1,
   "ts": 1789960092826,
-  "uid": 1557129,
-  "u": "昵称",
+  "uid": 0,
+  "uh": "3768840604",
+  "u": "赛***",
   "m": "弹幕内容",
   "color": 16777215,
   "lv": 42,
@@ -177,12 +179,25 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
   "vip": false,
   "admin": false,
 }
+
+// 礼物
+{ "t": "gift", "id": 2, "uid": 0, "uh": "3768840604", "u": "赛***", "g": "小心心",
+  "n": 10, "price": 0, "coin": "gold", "lv": 42, "guard": 3, "medal": ["粉丝牌", 12] }
+
+// 醒目留言
+{ "t": "sc", "id": 3, "uid": 0, "uh": "3768840604", "u": "赛***", "m": "留言正文",
+  "price": 30, "duration": 60, "lv": 42, "guard": 3, "medal": null,
+  "colorStart": "#b39ddb", "colorEnd": "#7e57c2",
+  "colorBottom": "#5e35b1", "fontColor": "#ffffff" }
 ```
 
 - **时区敏感**：按天分文件用的是本地时间，容器内已固定 `TZ=Asia/Shanghai`。
   自行部署时务必设置，否则北京时间 08:00 前的弹幕会被归到前一天。
 - 三类条目（弹幕 / 礼物 / SC）都会落盘并参与回显。
 - 页面重连时会带上最后收到的事件 id，服务端补发断线期间遗漏的弹幕，**不丢弹幕**。
+- **`uid` 实测恒为 `0`、`u` 是被打码的昵称**（如 `赛***`）——B 站对未登录观众隐藏了
+  这些字段。`uh`（B 站的 `user_hash`）才是能区分观众的稳定标识，
+  用户名着色也以它为首选种子。详见 [`docs/design.md`](docs/design.md) §20.2。
 
 ---
 

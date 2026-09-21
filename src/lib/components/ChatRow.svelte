@@ -18,7 +18,8 @@
 
 	let { item }: Props = $props();
 
-	const color = $derived(nameColor(item.uid, item.u));
+	/* 种子优先用 user_hash：真实环境 uid 恒为 0、昵称为打码串 */
+	const color = $derived(nameColor(item.uh || item.uid, item.u));
 	const guard = $derived(guardName(item.guard));
 	const guardTint = $derived(guardColor(item.guard));
 

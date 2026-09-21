@@ -52,24 +52,39 @@ export const NAME_COLORS = [
 ] as const;
 
 /**
- * 由 uid 稳定散列出一个用户名颜色。
+ * 由用户标识稳定散列出一个用户名颜色。
  *
- * 同一个 uid 永远得到同一个颜色（观众能形成「这个颜色是谁」的记忆），
- * 且相邻 uid 会落到不同颜色上（乘 2654435761 是一个常见的散列乘子）。
- * uid 缺失/为 0 时退回昵称散列，保证异常数据也稳定。
+ * 种子优先级：**user_hash > uid > 昵称**。
+ *
+ * 为什么 hash 优先：实测 B 站对未登录观众返回 `uid = 0` 且昵称被打码
+ * （`赛***`），只有 `info[0][15].extra.user_hash` 能区分不同观众。
+ * 若以 uid 为先，全场观众会塌成同一个颜色。昵称只是最后兜底 ——
+ * 打码后大量观众会撞名。
+ *
+ * 同一个种子永远得到同一个颜色（观众能形成「这个颜色是谁」的记忆），
+ * 且相邻种子会落到不同颜色上（乘 2654435761 是一个常用的散列乘子）。
  */
-export function nameColor(uid: number, name = ''): string {
+export function nameColor(seed: number | string, name = ''): string {
+	const key = typeof seed === 'string' ? seed.trim() : '';
+
 	let h: number;
-	if (uid && Number.isFinite(uid)) {
+	if (key) {
+		/* user_hash 是数字串（可能超出安全整数），逐字符 FNV-1a 更稳 */
+		h = fnv1a(key);
+	} else if (seed && Number.isFinite(Number(seed)) && Number(seed) !== 0) {
 		/* Knuth 乘法散列，避免连续 uid 得到相邻颜色 */
-		h = Math.imul(uid, 2654435761) >>> 0;
+		h = Math.imul(Number(seed), 2654435761) >>> 0;
 	} else {
-		h = 2166136261;
-		for (let i = 0; i < name.length; i++) {
-			h = Math.imul(h ^ name.charCodeAt(i), 16777619) >>> 0;
-		}
+		h = fnv1a(name);
 	}
 	return NAME_COLORS[h % NAME_COLORS.length];
+}
+
+/** FNV-1a 32 位散列 */
+function fnv1a(s: string): number {
+	let h = 2166136261;
+	for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+	return h;
 }
 
 /** 舰长等级 → 名称与配色 */
@@ -135,5 +150,5 @@ export function luminance(hex: string): number {
  */
 export function itemAccent(item: DanmakuItem): string {
 	if (item.t === 'sc') return pickAccent(item.colorBottom, item.colorEnd, item.colorStart);
-	return nameColor(item.uid, item.u);
+	return nameColor(item.uh || item.uid, item.u);
 }

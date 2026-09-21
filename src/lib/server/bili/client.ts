@@ -19,6 +19,7 @@ import {
 	type DanmuHost
 } from './api';
 import { OP, decode, encode, parseDanmakuInfo, type Packet } from './packet';
+import { parseGift, parseSuperChat } from './parse';
 import type { DanmakuInput } from '$lib/shared/types';
 import WebSocket from 'ws';
 import type { RawData } from 'ws';
@@ -77,6 +78,15 @@ export class DanmuClient {
 	/** 认证通过后是否已补发首次心跳 */
 	#firstHeartbeatSent = false;
 
+	/**
+	 * 本次会话的房间/宿主信息。
+	 *
+	 * 认证回应（op=8）本身不带这些字段，而 connected 状态必须有它们 ——
+	 * 否则 UI 在「连上」这一刻会丢掉房间号与开播状态（曾把 room 报成 undefined）。
+	 * 因此在 run() 解析出来后先存这里，认证成功时一并上报。
+	 */
+	#sessionInfo: { room: number; live: number; host: string } | null = null;
+
 	constructor(options: DanmuClientOptions) {
 		this.#opt = {
 			heartbeatMs: 25_000,
@@ -113,6 +123,7 @@ export class DanmuClient {
 
 		/* 1) 解析房间号 */
 		const { roomId, liveStatus } = await getRoomInit(this.#opt.room);
+		this.#sessionInfo = { room: roomId, live: liveStatus, host: '' };
 		this.#opt.onStatus({ s: 'connecting', room: roomId, live: liveStatus });
 
 		/* 2) 设备指纹 + token/宿主 */
@@ -141,6 +152,8 @@ export class DanmuClient {
 		token: string,
 		buvid: Buvid
 	): Promise<void> {
+		/* 连接前记录宿主，认证成功时随 connected 一起上报 */
+		this.#sessionInfo = { room: roomId, live: this.#sessionInfo?.live ?? 0, host: host.host };
 		/* 用 443 而不是 host_list 给的 wss_port：某些网络对 2244/2245 不友好 */
 		const url = `wss://${host.host}:443/sub`;
 		this.#log(`连接 ${url} 房间=${roomId}`);
@@ -307,7 +320,8 @@ export class DanmuClient {
 					this.#firstHeartbeatSent = true;
 					this.#sendHeartbeatIfPossible();
 				}
-				this.#opt.onStatus({ s: 'connected' });
+				/* connected 必须带上房间/开播/宿主，否则标题栏会短暂丢失信息 */
+				this.#opt.onStatus({ s: 'connected', ...(this.#sessionInfo ?? {}) });
 			} else {
 				this.#log('认证失败:', JSON.stringify(reply).slice(0, 200));
 			}
@@ -334,6 +348,7 @@ export class DanmuClient {
 				t: 'danmaku',
 				ts,
 				uid: info.uid,
+				uh: info.uh,
 				u: info.uname,
 				m: info.text,
 				color: info.color,
@@ -347,77 +362,18 @@ export class DanmuClient {
 		}
 
 		if (cmd === 'SEND_GIFT') {
-			const d = (msg.data ?? {}) as Record<string, unknown>;
-			const num = Number(d.num) || 1;
-			this.#opt.onEvent({
-				t: 'gift',
-				ts,
-				uid: Number(d.uid) || 0,
-				u: String(d.uname ?? ''),
-				g: String(d.giftName ?? '礼物'),
-				n: num,
-				price: (Number(d.price) || 0) * num,
-				coin: String(d.coin_type ?? 'gold'),
-				lv: Number((d.wealth_level as unknown) ?? 0) || 0,
-				guard: Number(d.guard_level) || 0,
-				medal: parseMedalInfo(d.medal_info)
-			});
+			const gift = parseGift(msg.data, ts);
+			if (gift) this.#opt.onEvent(gift);
 			return;
 		}
 
 		if (cmd === 'SUPER_CHAT_MESSAGE') {
-			const d = (msg.data ?? {}) as Record<string, unknown>;
-			const ui = (d.user_info ?? {}) as Record<string, unknown>;
-			const uinfo = (d.uinfo ?? {}) as Record<string, unknown>;
-			const medalRaw = uinfo.medal ?? ui.medal;
-
-			this.#opt.onEvent({
-				t: 'sc',
-				ts,
-				uid: Number(d.uid) || 0,
-				u: String(ui.uname ?? ''),
-				m: String(d.message ?? ''),
-				price: Number(d.price) || 0,
-				duration: Number(d.time) || 0,
-				lv: Number(uinfo.user_level ?? 0) || 0,
-				guard: Number(uinfo.guard_level ?? 0) || 0,
-				medal: parseMedalInfo(medalRaw),
-				colorStart: normalizeColor(d.background_color),
-				colorEnd: normalizeColor(d.background_color_end),
-				colorBottom: normalizeColor(d.background_bottom_color),
-				fontColor: normalizeColor(d.background_price_color)
-			});
+			const sc = parseSuperChat(msg.data, ts);
+			if (sc) this.#opt.onEvent(sc);
 			return;
 		}
 
 		/* 其余指令（上舰 / 进房 / 点赞 / 看过）本期忽略 */
 		void roomId;
 	}
-}
-
-/**
- * 解析粉丝牌信息。
- *
- * 弹幕走 info[3]（数组），礼物/SC 走 medal_info / medal（对象），
- * 两种形态都归一成 [名称, 等级]。
- */
-function parseMedalInfo(raw: unknown): [string, number] | null {
-	if (Array.isArray(raw)) {
-		/* 数组形态：info[3] = [等级, 名称, ...] */
-		if (raw.length > 1 && raw[1]) return [String(raw[1]), Number(raw[0]) || 0];
-		return null;
-	}
-	if (raw && typeof raw === 'object') {
-		const o = raw as Record<string, unknown>;
-		const name = o.medal_name ?? o.name;
-		const level = o.medal_level ?? o.level;
-		if (name) return [String(name), Number(level) || 0];
-	}
-	return null;
-}
-
-/** B 站下发 `#RRGGBB`；异常时回落到中性色，避免渲染出 invalid 值 */
-function normalizeColor(raw: unknown): string {
-	const s = String(raw ?? '').trim();
-	return /^#[0-9a-fA-F]{6}$/.test(s) ? s : '#4de2ff';
 }

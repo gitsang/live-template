@@ -14,9 +14,16 @@ interface Base {
 /** 弹幕 */
 export interface DanmakuEvent extends Base {
 	t: 'danmaku';
-	/** 发送者 uid */
+	/** 发送者 uid。B 站现已对未登录观众隐藏，实测恒为 0。 */
 	uid: number;
-	/** 发送者昵称 */
+	/**
+	 * 发送者稳定标识（B 站下发的 user_hash）。
+	 *
+	 * 实测 uid 恒为 0、昵称被打码（`赛***`），只有这个 hash 能区分用户，
+	 * 因此用户名着色**以它为首选种子**（见 $lib/shared/chat.ts 的 nameColor）。
+	 */
+	uh: string;
+	/** 发送者昵称，未登录时可能被打码 */
 	u: string;
 	/** 正文 */
 	m: string;
@@ -38,6 +45,8 @@ export interface DanmakuEvent extends Base {
 export interface GiftEvent extends Base {
 	t: 'gift';
 	uid: number;
+	/** 见 DanmakuEvent.uh 的说明 */
+	uh: string;
 	u: string;
 	/** 礼物名 */
 	g: string;
@@ -66,6 +75,8 @@ export interface GiftEvent extends Base {
 export interface SuperChatEvent extends Base {
 	t: 'sc';
 	uid: number;
+	/** 见 DanmakuEvent.uh 的说明 */
+	uh: string;
 	u: string;
 	/** 留言正文 */
 	m: string;

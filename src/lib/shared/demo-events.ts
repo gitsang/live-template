@@ -67,6 +67,11 @@ export interface DemoEventOptions {
 export function createDemoEvent({ index, ts = Date.now() }: DemoEventOptions): DanmakuInput {
 	const u = pick(DEMO_USERS);
 	const uid = randInt(1000, 99999);
+	/*
+	 * mock 也带上 user_hash：真实环境里 uid 恒为 0、昵称被打码，
+	 * 着色实际靠 hash。若 mock 只给 uid，就测不到「同一个人颜色稳定」这条。
+	 */
+	const uh = hashOf(u);
 	const lv = randInt(1, 60);
 	const guard = pick([0, 0, 0, 0, 3, 3, 2, 1]);
 	const medal = pick(MEDALS);
@@ -78,6 +83,7 @@ export function createDemoEvent({ index, ts = Date.now() }: DemoEventOptions): D
 			t: 'sc',
 			ts,
 			uid,
+			uh,
 			u,
 			m: pick(SC_MESSAGES),
 			price: pick([30, 50, 100, 500, 1000]),
@@ -97,6 +103,7 @@ export function createDemoEvent({ index, ts = Date.now() }: DemoEventOptions): D
 			t: 'gift',
 			ts,
 			uid,
+			uh,
 			u,
 			g: pick(DEMO_GIFTS),
 			n: pick([1, 1, 5, 10, 30, 100]),
@@ -113,6 +120,7 @@ export function createDemoEvent({ index, ts = Date.now() }: DemoEventOptions): D
 		t: 'danmaku',
 		ts,
 		uid,
+		uh,
 		u,
 		m: index % 12 === 0 ? DEMO_LONG_TEXT : pick(DEMO_TEXT),
 		color: 0xffffff,
@@ -122,4 +130,16 @@ export function createDemoEvent({ index, ts = Date.now() }: DemoEventOptions): D
 		vip: Math.random() < 0.2,
 		admin: Math.random() < 0.05
 	};
+}
+
+/**
+ * 由昵称生成一个稳定的 hash 串，模拟 B 站的 user_hash。
+ *
+ * 用 FNV-1a：同一个昵称永远得到同一个值，于是 mock 里「同一个人的用户名颜色
+ * 始终一致」这条能被验证（这正是真实环境里 user_hash 的作用）。
+ */
+function hashOf(s: string): string {
+	let h = 2166136261;
+	for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+	return String(h);
 }

@@ -98,8 +98,10 @@ export interface AuthReply {
 export interface RawDanmakuInfo {
 	/** info[1] 正文 */
 	text: string;
-	/** info[2][0] uid，info[2][1] 昵称 */
+	/** info[2][0] uid（B 站现已隐藏，实测恒为 0），info[2][1] 昵称 */
 	uid: number;
+	/** 用户稳定标识，取自 info[0][15].extra 的 user_hash */
+	uh: string;
 	uname: string;
 	/** info[0][3] 正文颜色（十进制 RGB） */
 	color: number;
@@ -134,6 +136,7 @@ export function parseDanmakuInfo(info: unknown): RawDanmakuInfo | null {
 		return {
 			text: body,
 			uid: Number(user?.[0]) || 0,
+			uh: parseUserHash(meta?.[15]),
 			uname: String(user?.[1] ?? ''),
 			admin: Boolean(user?.[2]),
 			vip: Boolean(user?.[3]),
@@ -144,5 +147,26 @@ export function parseDanmakuInfo(info: unknown): RawDanmakuInfo | null {
 		};
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * 从 `info[0][15].extra` 取 user_hash。
+ *
+ * 结构是 `{ extra: "<JSON 字符串>" }` —— 注意 extra 本身是被序列化过的字符串，
+ * 需要二次 JSON.parse。B 站隐藏 uid 之后，这是唯一稳定的用户标识
+ * （实测 uid 恒为 0、昵称被打码，只有它能把不同观众区分开）。
+ * 解析失败一律返回空串，绝不因为一个可选字段丢掉整条弹幕。
+ */
+export function parseUserHash(raw: unknown): string {
+	try {
+		if (!raw || typeof raw !== 'object') return '';
+		const extra = (raw as Record<string, unknown>).extra;
+		if (typeof extra !== 'string' || extra === '') return '';
+		const parsed = JSON.parse(extra) as Record<string, unknown>;
+		const hash = parsed.user_hash;
+		return hash === undefined || hash === null ? '' : String(hash);
+	} catch {
+		return '';
 	}
 }

@@ -18,6 +18,12 @@ import { DanmakuStore, localDateKey } from '../src/lib/server/store.ts';
 import { EventBus } from '../src/lib/server/eventbus.ts';
 import { randomQueueUuid } from '../src/lib/server/bili/client.ts';
 import {
+	parseColor,
+	parseGift,
+	parseMedal,
+	parseSuperChat
+} from '../src/lib/server/bili/parse.ts';
+import {
 	GUARD_META,
 	MAX_CHAT_ITEMS,
 	NAME_COLORS,
@@ -291,7 +297,222 @@ test('聊天框可见行数约 18 行（实测单行 33px）', () => {
 	assert.equal(rows, 18);
 });
 
+/* ==================== B 站报文解析（礼物 / SC） ==================== */
+
+/*
+ * SC 与礼物在真实直播间里很稀有（SC 尤其），
+ * 靠连线上碰运气验证不现实，因此这里用**与 B 站实际下发结构一致**的报文做固定夹具。
+ * 下面 DANMU_MSG 的 info 数组是从真实直播间抓下来的原样数据。
+ */
+
+test('真实 DANMU_MSG 的 info 索引与本项目映射一致', () => {
+	/* 抓自真实直播间：info[3] 是 [等级, 名称, 主播名, ...] 形式 */
+	const info = [
+		[0, 1, 25, 16777215, 1789975608830],
+		'不用自己做饭挺舒服的',
+		[626170076, '赛小泯321', 0, 0, 0, 10000, 1, ''],
+		[25, '莉娅娅', '奈奈莉娅Channel', 22301377],
+		[13, 0, 6406234, '>50000', 0],
+		['', ''],
+		'',
+		0
+	];
+	const got = parseDanmakuInfo(info);
+	assert.ok(got);
+	assert.equal(got.text, '不用自己做饭挺舒服的');
+	assert.equal(got.uid, 626170076);
+	assert.equal(got.uname, '赛小泯321');
+	assert.equal(got.color, 16777215);
+	assert.equal(got.level, 13, '等级取 info[4][0]');
+	assert.equal(got.guard, 0, '舰长取 info[7]');
+	assert.deepEqual(got.medal, ['莉娅娅', 25], '粉丝牌 = [info[3][1], info[3][0]]');
+});
+
+test('parseMedal 同时认数组形态与对象形态', () => {
+	/* 弹幕：数组 [等级, 名称] */
+	assert.deepEqual(parseMedal([25, '莉娅娅', '主播', 1]), ['莉娅娅', 25]);
+	/* 礼物 / SC：对象 medal_info */
+	assert.deepEqual(parseMedal({ medal_name: '航海', medal_level: 21 }), ['航海', 21]);
+	/* SC：对象且字段名不带 medal_ 前缀 */
+	assert.deepEqual(parseMedal({ name: '七海', level: 12 }), ['七海', 12]);
+});
+
+test('parseMedal 对无粉丝牌/畸形输入返回 null', () => {
+	assert.equal(parseMedal(null), null);
+	assert.equal(parseMedal([]), null);
+	assert.equal(parseMedal([0, '', '']), null, '空名称视为无粉丝牌');
+	assert.equal(parseMedal({}), null);
+	assert.equal(parseMedal('nope'), null);
+	assert.doesNotThrow(() => parseMedal(undefined));
+});
+
+test('parseColor 只接受 #RRGGBB 并统一小写', () => {
+	assert.equal(parseColor('#B39DDB'), '#b39ddb');
+	assert.equal(parseColor('  #FFFFFF '), '#ffffff');
+	assert.equal(parseColor('#abc'), null, '三位缩写不接受');
+	assert.equal(parseColor('red'), null);
+	assert.equal(parseColor(''), null);
+	assert.equal(parseColor(undefined), null);
+	assert.equal(parseColor(123), null);
+});
+
+test('parseGift 解析完整礼物报文', () => {
+	const got = parseGift(
+		{
+			uid: 3063712,
+			uname: '钢铁侠',
+			giftName: '小心心',
+			num: 10,
+			price: 100,
+			coin_type: 'gold',
+			guard_level: 3,
+			wealth_level: 42,
+			medal_info: { medal_name: '航海', medal_level: 21 }
+		},
+		1700000000000
+	);
+	assert.ok(got);
+	assert.equal(got.t, 'gift');
+	assert.equal(got.u, '钢铁侠');
+	assert.equal(got.g, '小心心');
+	assert.equal(got.n, 10);
+	assert.equal(got.price, 1000, 'price 是单价，需乘数量得到总价值');
+	assert.equal(got.coin, 'gold');
+	assert.equal(got.lv, 42);
+	assert.equal(got.guard, 3);
+	assert.deepEqual(got.medal, ['航海', 21]);
+	assert.equal(got.ts, 1700000000000);
+});
+
+test('parseGift 对缺字段做兜底而不是丢掉整条', () => {
+	/* 银瓜子免费礼物：没有 price、没有粉丝牌 */
+	const got = parseGift({ uname: '甲', giftName: '辣条', num: 1, coin_type: 'silver' }, 1);
+	assert.ok(got);
+	assert.equal(got.price, 0);
+	assert.equal(got.n, 1);
+	assert.equal(got.medal, null);
+	assert.equal(got.uid, 0);
+	assert.equal(got.coin, 'silver');
+});
+
+test('parseGift 归一化异常的数量与单价', () => {
+	/* num 缺失或为 0 时至少记 1 个（否则「赠送 ×0」很怪） */
+	assert.equal(parseGift({ num: 0 }, 1)?.n, 1);
+	assert.equal(parseGift({ num: '3' }, 1)?.n, 3, '字符串数字也能解析');
+	assert.equal(parseGift({ price: 'abc', num: 2 }, 1)?.price, 0, '非法单价按 0');
+	assert.equal(parseGift({}, 1)?.g, '礼物', '礼物名缺失时用占位名');
+});
+
+test('parseSuperChat 解析完整 SC 报文', () => {
+	const got = parseSuperChat(
+		{
+			uid: 12345,
+			price: 100,
+			time: 120,
+			message: '主播加油！这把我压你赢',
+			background_color_start: '#B39DDB',
+			background_color_end: '#7E57C2',
+			background_bottom_color: '#5E35B1',
+			message_font_color: '#FFFFFF',
+			uinfo: {
+				uname: '林深见鹿',
+				user_level: 45,
+				guard_level: 2,
+				medal: { name: '七海', level: 12 }
+			},
+			user_info: { uname: '林深见鹿', user_level: 45, guard_level: 2 }
+		},
+		1700000000000
+	);
+	assert.ok(got);
+	assert.equal(got.t, 'sc');
+	assert.equal(got.u, '林深见鹿');
+	assert.equal(got.m, '主播加油！这把我压你赢');
+	assert.equal(got.price, 100);
+	assert.equal(got.duration, 120);
+	assert.equal(got.lv, 45);
+	assert.equal(got.guard, 2);
+	assert.deepEqual(got.medal, ['七海', 12]);
+	assert.equal(got.colorBottom, '#5e35b1');
+	assert.equal(got.fontColor, '#ffffff');
+});
+
+test('parseSuperChat 在 uinfo 缺失时退回 user_info', () => {
+	/* B 站两处都放用户信息，且不同版本缺的不一样 */
+	const got = parseSuperChat(
+		{ price: 30, message: 'hi', user_info: { uname: '乙', user_level: 7, guard_level: 3 } },
+		1
+	);
+	assert.ok(got);
+	assert.equal(got.u, '乙');
+	assert.equal(got.lv, 7);
+	assert.equal(got.guard, 3);
+});
+
+test('parseSuperChat 对缺失主题色给中性兜底，不产生非法值', () => {
+	const got = parseSuperChat({ message: 'hi', price: 30 }, 1);
+	assert.ok(got);
+	for (const key of ['colorStart', 'colorEnd', 'colorBottom', 'fontColor'] as const) {
+		assert.match(got[key], /^#[0-9a-f]{6}$/, `${key} 必须是合法颜色`);
+	}
+});
+
+test('parseSuperChat 接受 gradient_* 别名', () => {
+	const got = parseSuperChat(
+		{ message: 'x', price: 1, gradient_start: '#EDF5FF', gradient_end: '#7E57C2' },
+		1
+	);
+	assert.ok(got);
+	assert.equal(got.colorStart, '#edf5ff');
+	assert.equal(got.colorEnd, '#7e57c2');
+	/* bottom 缺失时回落到较深的 end，而不是浅色的 start */
+	assert.equal(got.colorBottom, '#7e57c2');
+});
+
+test('parseSuperChat 丢弃无正文的消息', () => {
+	assert.equal(parseSuperChat({ price: 100, message: '' }, 1), null);
+	assert.equal(parseSuperChat({ price: 100 }, 1), null);
+	assert.equal(parseSuperChat(null, 1), null);
+});
+
 /* ==================== 聊天框配色与格式化 ==================== */
+
+test('nameColor 优先用 user_hash 作为种子', () => {
+	/*
+	 * 回归测试：实测真实直播间 uid 恒为 0、昵称被打码（赛***），
+	 * 只有 user_hash 能区分观众。若以实现顺序（uid 优先）着色，全场会塌成同色。
+	 */
+	const a = nameColor('969626962', 'x***');
+	const b = nameColor('3768840604', '赛***');
+	const c = nameColor('3605286734', '楓***');
+	assert.equal(new Set([a, b, c]).size, 3, '三个不同 hash 应得到三种颜色');
+
+	/* 同一个 hash 即使昵称被打码成不同串也必须同色 */
+	assert.equal(nameColor('969626962', 'x***'), nameColor('969626962', '**不同**'));
+
+	/* 一批真实量级的 hash 要有足够区分度 */
+	const seen = new Set<string>();
+	for (let i = 0; i < 100; i++) seen.add(nameColor(String(3768840604 + i * 7919)));
+	assert.ok(seen.size >= 6, `hash 颜色分布过窄: ${seen.size}/8`);
+});
+
+test('nameColor 在 hash 缺失时才退回 uid / 昵称', () => {
+	/* 空 hash + 非零 uid → 用 uid */
+	assert.equal(nameColor(0, 'x'), nameColor('', 'x'));
+	assert.notEqual(nameColor(12345, 'x'), nameColor(67890, 'x'));
+	/* uid 也是 0（真实环境的常态）→ 退回昵称 */
+	assert.equal(nameColor(0, '夜航船'), nameColor(0, '夜航船'));
+	assert.notEqual(nameColor(0, '夜航船'), nameColor(0, '一勺糖'));
+	/* 全空也要给一个合法颜色，不能抛错 */
+	assert.ok((NAME_COLORS as readonly string[]).includes(nameColor('', '')));
+});
+
+test('真实 user_hash 是超出安全整数的数字串也能稳定散列', () => {
+	/* 长度上限 10 位的数字串：用逐字符 FNV 而不是 Number()，避免精度丢失 */
+	const big = '9999999999';
+	assert.equal(nameColor(big, 'a'), nameColor(big, 'b'));
+	assert.ok((NAME_COLORS as readonly string[]).includes(nameColor(big)));
+});
 
 test('nameColor 对同一 uid 稳定、对不同 uid 有区分度', () => {
 	/* 稳定性：观众能形成「这个颜色是谁」的记忆 */
@@ -360,6 +581,7 @@ test('itemAccent：弹幕/礼物用用户名色，SC 用主题最深色', () => 
 		id: 1,
 		ts: 1,
 		uid: 42,
+		uh: 'hash-42',
 		u: '甲',
 		m: 'x',
 		color: 0xffffff,
@@ -369,13 +591,15 @@ test('itemAccent：弹幕/礼物用用户名色，SC 用主题最深色', () => 
 		vip: false,
 		admin: false
 	};
-	assert.equal(itemAccent(danmaku), nameColor(42, '甲'));
+	/* uh 存在时以 hash 为种子（真实环境 uid 恒为 0） */
+	assert.equal(itemAccent(danmaku), nameColor('hash-42', '甲'));
 
 	const sc = {
 		t: 'sc' as const,
 		id: 2,
 		ts: 1,
 		uid: 7,
+		uh: 'hash-7',
 		u: '乙',
 		m: 'y',
 		price: 30,
@@ -484,8 +708,8 @@ test('EventBus 分配自增 id 并广播', () => {
 	const bus = new EventBus();
 	const got: number[] = [];
 	bus.subscribe((e) => got.push(e.id));
-	const a = bus.publish({ t: 'danmaku', ts: 1, uid: 1, u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
-	const b = bus.publish({ t: 'danmaku', ts: 2, uid: 1, u: 'u', m: 'm2', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
+	const a = bus.publish({ t: 'danmaku', ts: 1, uid: 1, uh: 'h1', u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
+	const b = bus.publish({ t: 'danmaku', ts: 2, uid: 1, uh: 'h2', u: 'u', m: 'm2', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
 	assert.equal(a.id, 1);
 	assert.equal(b.id, 2);
 	assert.deepEqual(got, [1, 2]);
@@ -494,7 +718,7 @@ test('EventBus 分配自增 id 并广播', () => {
 test('EventBus 补发只返回 since 之后的事件', () => {
 	const bus = new EventBus();
 	for (let i = 0; i < 5; i++) {
-		bus.publish({ t: 'danmaku', ts: i, uid: 1, u: 'u', m: 'm' + i, color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
+		bus.publish({ t: 'danmaku', ts: i, uid: 1, uh: 'hi', u: 'u', m: 'm' + i, color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
 	}
 	const { events, top } = bus.replay(2);
 	assert.deepEqual(events.map((e) => e.id), [3, 4, 5]);
@@ -504,7 +728,7 @@ test('EventBus 补发只返回 since 之后的事件', () => {
 test('EventBus 补发受条数上限约束', () => {
 	const bus = new EventBus({ replayMax: 3 });
 	for (let i = 0; i < 10; i++) {
-		bus.publish({ t: 'danmaku', ts: i, uid: 1, u: 'u', m: 'm' + i, color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
+		bus.publish({ t: 'danmaku', ts: i, uid: 1, uh: 'hi', u: 'u', m: 'm' + i, color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
 	}
 	const { events } = bus.replay(0);
 	assert.equal(events.length, 3);
@@ -514,7 +738,7 @@ test('EventBus 补发受条数上限约束', () => {
 test('EventBus 环形历史上限生效', () => {
 	const bus = new EventBus({ historySize: 5 });
 	for (let i = 0; i < 20; i++) {
-		bus.publish({ t: 'danmaku', ts: i, uid: 1, u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
+		bus.publish({ t: 'danmaku', ts: i, uid: 1, uh: 'hi', u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
 	}
 	assert.equal(bus.replay(0).events.length, 5);
 });
@@ -537,7 +761,7 @@ test('EventBus 单个订阅者抛错不影响其他订阅者', () => {
 		called = true;
 	});
 	assert.doesNotThrow(() =>
-		bus.publish({ t: 'danmaku', ts: 1, uid: 1, u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false })
+		bus.publish({ t: 'danmaku', ts: 1, uid: 1, uh: 'h1', u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false })
 	);
 	assert.equal(called, true);
 });
@@ -546,9 +770,9 @@ test('EventBus 取消订阅后不再收到事件', () => {
 	const bus = new EventBus();
 	let n = 0;
 	const off = bus.subscribe(() => n++);
-	bus.publish({ t: 'danmaku', ts: 1, uid: 1, u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
+	bus.publish({ t: 'danmaku', ts: 1, uid: 1, uh: 'h1', u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
 	off();
-	bus.publish({ t: 'danmaku', ts: 2, uid: 1, u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
+	bus.publish({ t: 'danmaku', ts: 2, uid: 1, uh: 'h2', u: 'u', m: 'm', color: 0, lv: 0, guard: 0, medal: null, vip: false, admin: false });
 	assert.equal(n, 1);
 });
 
@@ -560,6 +784,7 @@ function danmaku(id: number, ts: number, text: string) {
 		id,
 		ts,
 		uid: id,
+		uh: String(id * 7919),
 		u: 'user' + id,
 		m: text,
 		color: 0xffffff,
@@ -622,6 +847,7 @@ test('Store 回显含弹幕/礼物/SC，忽略其余类型', async () => {
 			id: 2,
 			ts: Date.now(),
 			uid: 1,
+			uh: 'h1',
 			u: 'g',
 			g: '小心心',
 			n: 1,
@@ -636,6 +862,7 @@ test('Store 回显含弹幕/礼物/SC，忽略其余类型', async () => {
 			id: 3,
 			ts: Date.now(),
 			uid: 1,
+			uh: 'h1',
 			u: 'sc',
 			m: '留言',
 			price: 30,
