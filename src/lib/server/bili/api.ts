@@ -62,12 +62,13 @@ export interface Buvid {
 }
 
 export class BiliApiError extends Error {
-	constructor(
-		message: string,
-		readonly code?: number
-	) {
+	/** B 站返回的业务 code（HTTP 层错误时为空） */
+	readonly code: number | undefined;
+
+	constructor(message: string, code?: number) {
 		super(message);
 		this.name = 'BiliApiError';
+		this.code = code;
 	}
 }
 
