@@ -509,7 +509,7 @@ URL 查询参数  >  环境变量  >  config.json  >  内置默认值
 | 空闲断开 | `idleMs` | `IDLE_MS` | — | `60000` | 引用计数归零后断开延时 |
 | 回显条数 | `echoCount` | `ECHO_COUNT` | — | `10` | 启动回放条数 |
 | 日志级别 | `logLevel` | `LOG_LEVEL` | — | `info` | debug/info/warn/error |
-| 登录态 | `biliCookie` | `BILI_COOKIE` / `BILI_COOKIE_FILE` | — | 空（匿名） | B 站 Cookie，减少昵称打码；⚠️ 凭据，勿入库 |
+| 登录态 | `biliCookie` | `BILI_COOKIE` / `BILI_COOKIE_FILE` | — | 空（匿名） | B 站 Cookie，减少昵称打码；⚠️ 凭据，勿入库；可用 `npm run login` 扫码获取 |
 
 > `config.json` 为仓库内可提交的默认值；本地覆盖用 `.env`（见 `.env.example`，git 忽略）。
 
@@ -720,6 +720,41 @@ nav 接口校验 isLogin 且 mid == 解析出的 uid   ← 缺这步会被服务
 但必须给出明确告警（写日志 + 随 `status` 事件上报），
 否则使用者会「以为自己登录了」。
 
+#### 交互式登录（扫码）
+
+`npm run login` / `docker compose run --rm login`，用 B 站 App 扫码即可，
+不必手抄 Cookie。手抄有两个现实问题：容易漏字段（缺 `DedeUserID` 就无法解析
+uid，认证包里表达不出登录身份），以及容易在粘贴过程中把 `SESSDATA`
+留在聊天记录或工单里。
+
+流程用官方 H5 扫码接口：
+
+```
+GET  /x/passport-login/web/qrcode/generate        → { url, qrcode_key }
+轮询 /x/passport-login/web/qrcode/poll?qrcode_key=
+       86101 未扫码 → 86090 已扫码待确认 → 0 成功（HTTP Set-Cookie 下发凭据）
+```
+
+实测要点：
+
+- 未扫码时状态码稳定返回 `86101`（连续轮询 8 次确认）。
+- **成功分支无法在无人值守环境复现**，因此 `qrlogin.ts` 把状态码判定与
+  Cookie 提取全部做成纯函数，用固定报文测试；网络调用留在薄外层。
+- 凭据可能出现在两处，都做兜底：HTTP `Set-Cookie`（主流）与
+  `data.url` 查询串（旧版行为）。
+- 从 `Set-Cookie` 提取时必须**按第一个分号截断**，否则
+  `Path=`/`Expires=`/`HttpOnly` 会被拼进 Cookie 头污染请求。
+- 从跳转地址提取时**不能用 `URLSearchParams`**：它会百分号解码，而
+  `SESSDATA` 的值本身就带 `%2C` 之类的转义、是编码形态，解码后凭据会失效。
+- 超时与过期是**两个不同状态**。混为一谈会打印出
+  「二维码已过期（状态码 86101）」这种自相矛盾的信息 —— 86101 是未扫码，
+  86038 才是过期。这个 bug 是实跑 CLI 时发现的。
+
+CLI 会被打进 `build/danmaku/login.js`（纯 JS）。原因：生产镜像执行
+`npm prune --omit=dev`，而运行 TS 需要 `tsx`，不打包的话
+`docker exec ... npm run login` 在容器里必然失败 —— 恰恰是容器部署时最需要
+扫码的场景。
+
 #### 凭据的处理约定
 
 - **绝不打印原始 Cookie**。唯一允许输出 Cookie 信息的通道是
@@ -732,6 +767,10 @@ nav 接口校验 isLogin 且 mid == 解析出的 uid   ← 缺这步会被服务
   指向一个 `chmod 600` 的文件。环境变量会出现在 `docker inspect`、
   `/proc/<pid>/environ` 与日志采集系统里，凭据不宜放那里。
 - `secrets/`、`*.cookie` 已加入 `.gitignore`。
+- 凭据文件权限固定 `600`。注意 `writeFileSync` 的 `mode` **只在新建时生效**，
+  覆盖已存在文件必须再 `chmod` 一次，否则反复登录时权限会停留在旧设置。
+- 从文件读取时若发现权限过宽（group/other 可读）会告警但不阻断 ——
+  可能是有意为之（如共享部署），但使用者应当知情。
 
 ### 20.5 容量与性能
 

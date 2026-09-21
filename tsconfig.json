@@ -11,10 +11,28 @@
 		"sourceMap": true,
 		"strict": true,
 		"moduleResolution": "bundler"
-	}
-	// Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
-	// except $lib which is handled by https://svelte.dev/docs/kit/configuration#files
+	},
+	// 在 SvelteKit 生成的 include 之上补一项：scripts/**/*.ts。
 	//
-	// To make changes to top-level options such as include and exclude, we recommend extending
-	// the generated config; see https://svelte.dev/docs/kit/configuration#typescript
+	// 生成的配置只覆盖 src/ 与 tests/。tools/ 之所以也能被检查，是因为
+	// vite.config.ts 引用了它，于是被 tsconfig 的导入图顺带收进来；
+	// 而 scripts/ 下的入口（如 bili-login.ts）没有任何人 import，
+	// 因此完全不参与类型检查 —— 这是实测注入一个类型错误后仍然报 0 error 确认的。
+	//
+	// 注意不要把 server.mjs 加进来：它 import 了 build/ 下的构建产物，
+	// 会把整个 build/ 拉进检查范围（实测多出 900+ 条无意义报错）。
+	"include": [
+		".svelte-kit/ambient.d.ts",
+		".svelte-kit/env.d.ts",
+		".svelte-kit/non-ambient.d.ts",
+		".svelte-kit/types/**/$types.d.ts",
+		"vite.config.ts",
+		"vite.server.config.ts",
+		"src/**/*.js",
+		"src/**/*.ts",
+		"src/**/*.svelte",
+		"tests/**/*.ts",
+		"tools/**/*.ts",
+		"scripts/**/*.ts"
+	]
 }

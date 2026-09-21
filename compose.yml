@@ -24,7 +24,7 @@ services:
       LOG_LEVEL: '${LOG_LEVEL:-info}'
       # B 站登录态（可选）：留空为匿名，此时部分昵称会被 B 站打码。
       # 优先用文件方式：环境变量会出现在 docker inspect 与日志采集里。
-      BILI_COOKIE_FILE: '${BILI_COOKIE_FILE:-/run/secrets/bili-cookie}'
+      BILI_COOKIE_FILE: '${BILI_COOKIE_FILE:-/run/secrets/bili-cookie.txt}'
       BILI_COOKIE: '${BILI_COOKIE:-}'
     volumes:
       # 弹幕归档持久化（重启后仍能回显）
@@ -34,3 +34,26 @@ services:
       - ./secrets:/run/secrets:ro
     # 若 OBS 在宿主机、服务在容器内，用 host 网络可避免额外的端口映射问题
     # network_mode: host
+
+  # 一次性扫码登录（用完即弃）。
+  #
+  #   docker compose run --rm login
+  #
+  # 存在的意义：纯 Docker 部署时宿主机可能根本没装 Node，
+  # 无法执行 `npm run login`。这里直接复用镜像里已打包的 login.js，
+  # 因此只要 Docker 能跑就能扫码。
+  #
+  # ./secrets 在这里是**可写**的（服务容器的挂载是只读的 ——
+  # 运行中的服务不需要写凭据，权限按最小化给）。
+  login:
+    profiles: ['tools']
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: live-template:latest
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./secrets:/secrets
+    # -it 由 `docker compose run` 提供；二维码是靠终端字符画的，必须有 TTY
+    command: node build/danmaku/login.js --out /secrets/bili-cookie.txt

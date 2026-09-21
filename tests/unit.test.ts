@@ -8,8 +8,9 @@
  */
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, writeFile, appendFile } from 'node:fs/promises';
+import { chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { brotliCompressSync, deflateSync } from 'node:zlib';
 
 import { OP, VER, decode, encode, parseDanmakuInfo } from '../src/lib/server/bili/packet.ts';
@@ -17,6 +18,19 @@ import { wbiMixinKey, wbiSign } from '../src/lib/server/bili/api.ts';
 import { DanmakuStore, localDateKey } from '../src/lib/server/store.ts';
 import { EventBus } from '../src/lib/server/eventbus.ts';
 import { randomQueueUuid } from '../src/lib/server/bili/client.ts';
+import {
+	DEFAULT_COOKIE_FILE,
+	isRestrictive,
+	readCookieFile,
+	writeCookieFile
+} from '../src/lib/server/credential.ts';
+import {
+	QR_CODE,
+	QR_STATUS_TEXT,
+	extractLoginCookie,
+	extractLoginCookieFromUrl,
+	parseQrStatus
+} from '../src/lib/server/bili/qrlogin.ts';
 import {
 	buildAuthPacket,
 	buvidFromCookie,
@@ -740,6 +754,201 @@ test('isMaskedName 识别 B 站的打码昵称', () => {
 	assert.equal(isMaskedName(''), false);
 	/* 单个星号不算打码（真实昵称里可能有 *） */
 	assert.equal(isMaskedName('a*b'), false);
+});
+
+/* ==================== 扫码登录 ==================== */
+
+/*
+ * 「登录成功」这一分支需要真人扫码，无法在无人值守环境复现，
+ * 因此把解析全部做成纯函数，用**实测得到的真实报文**做夹具。
+ */
+
+test('parseQrStatus 覆盖实测到的四种状态码', () => {
+	/* 未扫码：实测连续轮询 8 次都稳定返回 86101 */
+	assert.equal(parseQrStatus(QR_CODE.PENDING), 'pending');
+	assert.equal(parseQrStatus(QR_CODE.SCANNED), 'scanned');
+	assert.equal(parseQrStatus(QR_CODE.SUCCESS), 'success');
+	assert.equal(parseQrStatus(QR_CODE.EXPIRED), 'expired');
+});
+
+test('parseQrStatus 对未知码给 unknown 而不是误判成功', () => {
+	/* 关键：宁可显示「未知」也不能把非零码当成登录成功 */
+	for (const code of [undefined, -1, 1, -101, 86102, 99999]) {
+		assert.notEqual(parseQrStatus(code as number), 'success', `code=${code} 不应判定成功`);
+	}
+	assert.equal(parseQrStatus(undefined), 'unknown');
+});
+
+test('每个状态都有给人看的文案', () => {
+	for (const st of ['pending', 'scanned', 'success', 'expired', 'timeout', 'unknown'] as const) {
+		assert.ok(QR_STATUS_TEXT[st]?.length > 0, `${st} 缺文案`);
+	}
+});
+
+test('超时与过期是不同的状态（不能混为一谈）', () => {
+	/*
+	 * 回归测试：曾经把超时直接标成 expired，于是打印出
+	 * 「二维码已过期（状态码 86101）」—— 86101 其实是「未扫码」，
+	 * 使用者会以为二维码失效，实际只是没人扫。
+	 */
+	assert.notEqual(QR_STATUS_TEXT.timeout, QR_STATUS_TEXT.expired);
+	assert.match(QR_STATUS_TEXT.timeout, /超时/);
+	assert.match(QR_STATUS_TEXT.expired, /过期/);
+});
+
+test('extractLoginCookie 只保留凭据字段并剥掉 Cookie 属性', () => {
+	/*
+	 * 真实 Set-Cookie 会带 Path/Expires/HttpOnly 等属性，
+	 * 直接拼进 Cookie 头会污染请求，必须按第一个分号截断。
+	 */
+	const setCookies = [
+		'SESSDATA=abc%2Cdef; Path=/; Domain=.bilibili.com; Expires=Wed, 01 Jan 2027 00:00:00 GMT; HttpOnly',
+		'bili_jct=deadbeef; Path=/; Domain=.bilibili.com',
+		'DedeUserID=1557129; Path=/',
+		'DedeUserID__ckMd5=abcdef0123456789; Path=/',
+		'sid=xyz789; Path=/'
+	];
+	const out = extractLoginCookie(setCookies);
+	assert.match(out, /SESSDATA=abc%2Cdef/);
+	assert.match(out, /bili_jct=deadbeef/);
+	assert.match(out, /DedeUserID=1557129/);
+	assert.ok(!out.includes('Path='), '不得包含 Cookie 属性');
+	assert.ok(!out.includes('HttpOnly'), '不得包含 Cookie 属性');
+	assert.ok(!out.includes('Domain='), '不得包含 Cookie 属性');
+	assert.ok(!out.includes('Expires='), '不得包含 Cookie 属性');
+});
+
+test('extractLoginCookie 过滤无关字段与空值', () => {
+	const out = extractLoginCookie([
+		'SESSDATA=good; Path=/',
+		'LIVE_BUVID=AUTO123; Path=/',
+		'buvid3=; Path=/',
+		'b_nut=123; Path=/'
+	]);
+	assert.match(out, /SESSDATA=good/);
+	assert.ok(!out.includes('LIVE_BUVID'), '无关字段应丢弃');
+	assert.ok(!out.includes('b_nut'), '无关字段应丢弃');
+	assert.ok(!out.includes('buvid3=;'), '空值应丢弃（B 站会下发清除指令）');
+});
+
+test('extractLoginCookie 没有 SESSDATA 时返回空（视为未登录成功）', () => {
+	assert.equal(extractLoginCookie(['bili_jct=x; Path=/', 'DedeUserID=1; Path=/']), '');
+	assert.equal(extractLoginCookie([]), '');
+	assert.equal(extractLoginCookie(['garbage']), '');
+});
+
+test('extractLoginCookie 能处理没有属性的裸 Cookie', () => {
+	assert.equal(extractLoginCookie(['SESSDATA=raw']), 'SESSDATA=raw');
+});
+
+test('extractLoginCookie 对畸形输入不抛错', () => {
+	assert.doesNotThrow(() => extractLoginCookie(['', '; ', '=x', 'SESSDATA=']));
+	assert.equal(extractLoginCookie(['', '=x', 'SESSDATA=']), '');
+});
+
+test('extractLoginCookieFromUrl 从跳转地址兜底取凭据', () => {
+	/* 旧版行为：凭据出现在 poll 返回的 url 查询串里（这里用占位值避免像真凭据） */
+	const url =
+		'https://www.bilibili.com/?DedeUserID=1557129&Expires=9999999999' +
+		'&SESSDATA=PLACEHOLDER%2CFAKE&bili_jct=PLACEHOLDERJCT&sid=PLACEHOLDERSID';
+	const out = extractLoginCookieFromUrl(url);
+	assert.match(out, /SESSDATA=PLACEHOLDER%2CFAKE/, '应保留 URL 编码形态');
+	assert.match(out, /DedeUserID=1557129/);
+	assert.match(out, /bili_jct=PLACEHOLDERJCT/);
+	assert.ok(!out.includes('Expires='), '无关参数应丢弃');
+});
+
+test('extractLoginCookieFromUrl 缺 SESSDATA 或非法地址时返回空', () => {
+	assert.equal(extractLoginCookieFromUrl(''), '');
+	assert.equal(extractLoginCookieFromUrl('not-a-url'), '');
+	assert.equal(extractLoginCookieFromUrl('https://x.com/?DedeUserID=1'), '');
+});
+
+/* ==================== 凭据文件 ==================== */
+
+test('writeCookieFile / readCookieFile 往返一致', async () => {
+	await withTempDir(async (dir) => {
+		const path = join(dir, 'nested', 'bili-cookie.txt');
+		const written = writeCookieFile(path, 'SESSDATA=a; DedeUserID=1');
+		assert.equal(written, resolve(path), '应返回绝对路径');
+		assert.equal(readCookieFile(path), 'SESSDATA=a; DedeUserID=1');
+	});
+});
+
+test('writeCookieFile 自动创建父目录', async () => {
+	await withTempDir(async (dir) => {
+		const path = join(dir, 'a', 'b', 'c', 'cookie.txt');
+		assert.doesNotThrow(() => writeCookieFile(path, 'SESSDATA=x'));
+		assert.equal(readCookieFile(path), 'SESSDATA=x');
+	});
+});
+
+test('writeCookieFile 权限为 600，且覆盖已存在文件时也会收紧', async () => {
+	await withTempDir(async (dir) => {
+		const path = join(dir, 'cookie.txt');
+
+		/* 先造一个宽松权限的文件，模拟手工创建过 */
+		await writeFile(path, 'old', { mode: 0o644 });
+		assert.equal(isRestrictive(path), false, '前置条件：初始权限应过宽');
+
+		writeCookieFile(path, 'SESSDATA=new');
+		assert.equal(isRestrictive(path), true, '覆盖写入后应变成仅本人可读写');
+	});
+});
+
+test('writeCookieFile 去掉首尾空白并补换行', async () => {
+	await withTempDir(async (dir) => {
+		const path = join(dir, 'c.txt');
+		writeCookieFile(path, '   SESSDATA=x   \n');
+		assert.equal(await readFile(path, 'utf8'), 'SESSDATA=x\n');
+	});
+});
+
+test('readCookieFile 把多行 Cookie 压成一行', async () => {
+	await withTempDir(async (dir) => {
+		const path = join(dir, 'c.txt');
+		/* 浏览器复制出来的 Cookie 常带换行 */
+		await writeFile(path, 'SESSDATA=a;\n  bili_jct=b;\n  DedeUserID=1\n', 'utf8');
+		const out = readCookieFile(path);
+		assert.ok(!out.includes('\n'), '结果不得含换行，否则会形成非法请求头');
+		assert.equal(out, 'SESSDATA=a; bili_jct=b; DedeUserID=1');
+	});
+});
+
+test('readCookieFile 文件不存在或为空时返回空串而不抛错', async () => {
+	await withTempDir(async (dir) => {
+		assert.equal(readCookieFile(join(dir, 'nope.txt')), '');
+		const empty = join(dir, 'empty.txt');
+		await writeFile(empty, '   \n  ', 'utf8');
+		assert.equal(readCookieFile(empty), '');
+	});
+});
+
+test('isRestrictive 判定 group/other 位', async () => {
+	await withTempDir(async (dir) => {
+		for (const [mode, expected] of [
+			[0o600, true],
+			[0o400, true],
+			[0o640, false],
+			[0o644, false],
+			[0o666, false]
+		] as const) {
+			const path = join(dir, `m${mode.toString(8)}`);
+			await writeFile(path, 'x', { mode });
+			chmodSync(path, mode);
+			assert.equal(isRestrictive(path), expected, `mode=${mode.toString(8)}`);
+		}
+		/* 不存在的文件不应抛错 */
+		assert.equal(isRestrictive(join(dir, 'missing')), false);
+	});
+});
+
+test('默认凭据路径与文档/容器挂载点保持一致', () => {
+	/*
+	 * 回归测试：CLI 的默认输出路径必须与 compose 挂载点对得上，
+	 * 否则会出现「扫码成功但服务仍匿名」这种极难排查的现象。
+	 */
+	assert.equal(DEFAULT_COOKIE_FILE, 'secrets/bili-cookie.txt');
 });
 
 /* ==================== 聊天框配色与格式化 ==================== */

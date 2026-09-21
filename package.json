@@ -11,9 +11,12 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"test": "tsx tests/unit.test.ts"
+		"test": "tsx tests/unit.test.ts",
+		"login": "tsx scripts/bili-login.ts"
 	},
 	"dependencies": {
+		"qrcode-generator": "^2.0.4",
+		"qrcode-terminal": "^0.12.0",
 		"ws": "^8.18.0"
 	},
 	"devDependencies": {
@@ -21,6 +24,7 @@
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@types/node": "^24.0.0",
+		"@types/qrcode-terminal": "^0.12.2",
 		"@types/ws": "^8.5.13",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",

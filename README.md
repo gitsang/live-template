@@ -168,26 +168,57 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
 > 有的给打码昵称，这是 B 站在匿名连接上按消息隐藏的行为。
 > 好消息是 `user_hash` 始终稳定，所以用户名着色不受影响（见设计文档 §20.2）。
 
-### 配置
+### 扫码登录（推荐）
+
+不用手抄 Cookie，跑一条命令用手机扫一下即可：
 
 ```bash
-# 方式一（推荐）：从文件读取，可 chmod 600 且不进版本库
-mkdir -p secrets && printf '%s' 'SESSDATA=...; bili_jct=...; DedeUserID=...' > secrets/bili-cookie.txt
-chmod 600 secrets/bili-cookie.txt
+npm run login
+```
+
+终端会打印二维码，用 **B 站手机 App** 扫码并确认。成功后：
+
+- 凭据写入 `secrets/bili-cookie.txt`（权限自动设为 `600`）
+- 立刻用 `nav` 接口校验并打印账号昵称 —— 「是否真登录上了」当场可见
+- 只打印脱敏摘要，绝不回显凭据原值
+
+> 终端里显示的是字符画二维码，SSH 会话里同样可用。
+> 手机不方便扫时，命令会同时打印二维码链接，可在手机上直接打开。
+
+**容器部署**（宿主机没有 Node 也能用，镜像里已打包好）：
+
+```bash
+docker compose run --rm login
+```
+
+然后在 `.env` 里设置：
+
+```bash
+BILI_COOKIE_FILE=./secrets/bili-cookie.txt
+```
+
+### 手动配置（备选）
+
+```bash
+# 从文件读取：可 chmod 600 且不进版本库
 BILI_COOKIE_FILE=./secrets/bili-cookie.txt npm run dev
 
-# 方式二：环境变量（方便，但会出现在 docker inspect / 进程 environ / 日志采集里）
+# 环境变量：方便，但会出现在 docker inspect / 进程 environ / 日志采集里
 BILI_COOKIE='SESSDATA=...; bili_jct=...; DedeUserID=...' npm run dev
 ```
 
 Cookie 从浏览器开发者工具里复制（需含 `DedeUserID` 字段）。
-启动时会用 `nav` 接口**校验有效性**：
+
+### 有效性校验
+
+两种方式都会在启动时用 `nav` 接口**校验有效性**：
 
 - 校验通过 → 用真实 uid 连接，日志显示 `登录态有效 uid=...`
 - 校验不通过 → **降级为匿名连接**（不会让直播间连不上），并在日志与
   `/api/health` 中告警，避免「以为自己登录了」
 
-容器的做法见 `compose.yml`：把 `./secrets` 只读挂进 `/run/secrets`。
+容器的做法见 `compose.yml`：把 `./secrets` **只读**挂进 `/run/secrets`
+（运行中的服务不需要写凭据，权限按最小化给；只有 `login` 那个一次性容器是可写的）。
 
 ### 关于凭据安全
 

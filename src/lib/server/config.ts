@@ -4,8 +4,9 @@
  * 优先级：环境变量 > config.json > 内置默认值。
  * （URL 查询参数优先级最高，但只影响单个页面的视图开关，在 shared/view.ts 处理。）
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { isRestrictive, readCookieFile } from './credential';
 import type { ViewOptions } from '$lib/shared/view';
 
 export interface Config {
@@ -162,20 +163,25 @@ function resolveBiliCookie(env: NodeJS.ProcessEnv, file: FileConfig): string {
 	const path = str(env.BILI_COOKIE_FILE, '');
 	if (path) {
 		const abs = resolve(path);
-		try {
-			if (!existsSync(abs)) {
-				console.warn(`[config] BILI_COOKIE_FILE 指向的文件不存在: ${abs}，按匿名连接`);
-				return '';
+
+		/*
+		 * 注意：容器里 ./secrets 是**只读**挂载，扫码 CLI 必须在宿主机上跑
+		 * （见 README「登录态」）。这里只负责读。
+		 */
+		const raw = readCookieFile(abs);
+		if (raw) {
+			/* 权限过宽只告警不阻断：可能是有意为之（如共享部署） */
+			if (!isRestrictive(abs)) {
+				console.warn(
+					`[config] ${abs} 的权限过于宽松（同机其他用户可读），` +
+						'其中含账号凭据，建议 chmod 600'
+				);
 			}
-			/* 浏览器复制出来的 Cookie 常带换行，统一压成一行 */
-			const raw = readFileSync(abs, 'utf8').trim().replace(/\s*\r?\n\s*/g, ' ');
-			if (raw) return raw;
-			console.warn(`[config] BILI_COOKIE_FILE 内容为空: ${abs}，按匿名连接`);
-			return '';
-		} catch (err) {
-			console.warn(`[config] 读取 BILI_COOKIE_FILE 失败: ${(err as Error).message}，按匿名连接`);
-			return '';
+			return raw;
 		}
+
+		console.warn(`[config] 未能从 ${abs} 读到内容（文件不存在或为空），按匿名连接`);
+		return '';
 	}
 
 	return str(file.biliCookie, '');
