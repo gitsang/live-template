@@ -5,15 +5,15 @@
  * - 重连时带上最后收到的事件 id，服务端据此补发断线期间遗漏的弹幕
  * - 通过回调把 hello / status / danmaku 交给 UI
  */
-import type { DanmakuEvent, ServerMessage, StatusEvent } from '$lib/shared/types';
+import type { DanmakuItem, ServerMessage, StatusEvent } from '$lib/shared/types';
 
 export interface DanmakuClientHandlers {
 	/** 连接建立，拿到回显与最新状态 */
-	onHello?(room: string, latest: StatusEvent, echo: DanmakuEvent[]): void;
+	onHello?(room: string, latest: StatusEvent, echo: DanmakuItem[]): void;
 	/** 状态变更 */
 	onStatus?(status: StatusEvent): void;
-	/** 新弹幕 */
-	onDanmaku?(event: DanmakuEvent): void;
+	/** 新条目（弹幕 / 礼物 / SC） */
+	onItem?(event: DanmakuItem): void;
 }
 
 export interface DanmakuClientOptions extends DanmakuClientHandlers {
@@ -117,8 +117,9 @@ export class DanmakuClient {
 				break;
 			case 'danmaku':
 			case 'gift':
+			case 'sc':
 				if (msg.id > this.#lastId) this.#lastId = msg.id;
-				if (msg.t === 'danmaku') this.opt.onDanmaku?.(msg);
+				this.opt.onItem?.(msg);
 				break;
 			case 'ping':
 				this.#ws?.send(JSON.stringify({ t: 'pong' }));

@@ -12,7 +12,7 @@ import { DanmuClient } from './bili/client';
 import { EventBus } from './eventbus';
 import { DanmakuStore } from './store';
 import { createLogger } from './logger';
-import type { DanmakuEvent, StatusEvent } from '$lib/shared/types';
+import type { DanmakuItem, StatusEvent } from '$lib/shared/types';
 
 const log = createLogger('hub');
 
@@ -95,7 +95,7 @@ export class RoomSession {
 	}
 
 	/** 回显：读当天 JSONL 的最近若干条弹幕 */
-	async echo(): Promise<DanmakuEvent[]> {
+	async echo(): Promise<DanmakuItem[]> {
 		return this.store.readEcho(this.opt.echoCount);
 	}
 

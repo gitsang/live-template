@@ -18,6 +18,19 @@ import { DanmakuStore, localDateKey } from '../src/lib/server/store.ts';
 import { EventBus } from '../src/lib/server/eventbus.ts';
 import { randomQueueUuid } from '../src/lib/server/bili/client.ts';
 import {
+	GUARD_META,
+	MAX_CHAT_ITEMS,
+	NAME_COLORS,
+	VISIBLE_ROWS,
+	formatPrice,
+	guardColor,
+	guardName,
+	itemAccent,
+	nameColor,
+	pickAccent
+} from '../src/lib/shared/chat.ts';
+import { createDemoEvent } from '../src/lib/shared/demo-events.ts';
+import {
 	BASE,
 	BOXES,
 	PANELS,
@@ -262,10 +275,171 @@ test('panelSpec 生成可直接抄进 OBS 的描述', () => {
 	assert.equal(panelSpec('pad'), '480×340 @ 1412,712');
 });
 
-test('聊天框可见行数约 23 行（16px / 行高 1.6）', () => {
-	const lineHeight = 16 * 1.6;
-	const rows = Math.floor((BOXES.chat.h - 16) / lineHeight); // 减去上下 padding
-	assert.equal(rows, 23);
+test('聊天框可见行数约 18 行（实测单行 33px）', () => {
+	/*
+	 * 实测：单行 33px = 16px × 行高 1.6（25.6）+ 上下 padding 3px×2 + 1px 分隔线。
+	 * 内容可视高 = 630 − 上下 padding 12 = 618 → 618 / 33 = 18.7 → 完整 18 行。
+	 *
+	 * 两个曾经的错误数字，一并记在这里防止回退：
+	 * - 23 行 —— 只按 25.6px 算，漏了行内 padding 与分隔线
+	 * - 19 行 —— 用 clientHeight(630，含 padding) 去除，没扣掉 padding
+	 * 而且礼物/SC 行更高（SC 约 61px），混合时的可见条数会更少。
+	 */
+	const measuredRowHeight = 33;
+	const listPadding = 12; // 上下各 6px
+	const rows = Math.floor((BOXES.chat.h - listPadding) / measuredRowHeight);
+	assert.equal(rows, 18);
+});
+
+/* ==================== 聊天框配色与格式化 ==================== */
+
+test('nameColor 对同一 uid 稳定、对不同 uid 有区分度', () => {
+	/* 稳定性：观众能形成「这个颜色是谁」的记忆 */
+	for (const uid of [1, 42, 1557129, 99999999]) {
+		assert.equal(nameColor(uid), nameColor(uid));
+	}
+	/* 区分度：一批真实量级的 uid 不应挤在少数几种颜色里 */
+	const seen = new Set<string>();
+	for (let i = 0; i < 200; i++) seen.add(nameColor(100000 + i * 7919));
+	assert.ok(seen.size >= 6, `颜色分布过窄，只用到 ${seen.size}/${NAME_COLORS.length}`);
+});
+
+test('nameColor 只返回配色板里的颜色', () => {
+	for (let i = 0; i < 300; i++) {
+		assert.ok((NAME_COLORS as readonly string[]).includes(nameColor(i * 31337)));
+	}
+});
+
+test('nameColor 在 uid 缺失时退回昵称散列且仍然稳定', () => {
+	assert.equal(nameColor(0, '夜航船'), nameColor(0, '夜航船'));
+	assert.notEqual(nameColor(0, '夜航船'), nameColor(0, '一勺糖'));
+	assert.ok((NAME_COLORS as readonly string[]).includes(nameColor(0, '')));
+});
+
+test('uid 连续时也能散开，不落在相邻颜色上', () => {
+	/* 乘散列的意义：简单取模会让 1,2,3… 落到相邻色，看起来像同一批人 */
+	const picked = [1, 2, 3, 4, 5].map((uid) => nameColor(uid));
+	assert.ok(new Set(picked).size >= 4, `相邻 uid 颜色过于接近: ${picked.join(',')}`);
+});
+
+test('guardName / guardColor 只认 1/2/3', () => {
+	assert.equal(guardName(1), '总督');
+	assert.equal(guardName(2), '提督');
+	assert.equal(guardName(3), '舰长');
+	assert.equal(guardName(0), '');
+	assert.equal(guardName(99), '');
+	assert.match(guardColor(1), /^#[0-9a-f]{6}$/i);
+	assert.equal(guardColor(0), '');
+	assert.equal(Object.keys(GUARD_META).length, 3);
+});
+
+test('formatPrice 整数不带小数、非法值归零', () => {
+	assert.equal(formatPrice(30), '30');
+	assert.equal(formatPrice(1000), '1000');
+	assert.equal(formatPrice(9.5), '9.50');
+	assert.equal(formatPrice(0), '0');
+	assert.equal(formatPrice(-5), '0');
+	assert.equal(formatPrice(Number.NaN), '0');
+});
+
+test('pickAccent 取最深的一端（浅色在深底上会刺眼）', () => {
+	/* 模拟 B 站 SC 的浅色渐变：底栏色最深，应被选中 */
+	assert.equal(pickAccent('#EDF5FF', '#7E57C2', '#B39DDB'), '#7E57C2');
+	/* 顺序无关 */
+	assert.equal(pickAccent('#7E57C2', '#EDF5FF', '#B39DDB'), '#7E57C2');
+});
+
+test('pickAccent 忽略非法颜色并在全非法时回落', () => {
+	assert.equal(pickAccent('not-a-color', '#123456'), '#123456');
+	assert.equal(pickAccent('', 'nope', undefined as unknown as string), '#4de2ff');
+});
+
+test('itemAccent：弹幕/礼物用用户名色，SC 用主题最深色', () => {
+	const danmaku = {
+		t: 'danmaku' as const,
+		id: 1,
+		ts: 1,
+		uid: 42,
+		u: '甲',
+		m: 'x',
+		color: 0xffffff,
+		lv: 1,
+		guard: 0,
+		medal: null,
+		vip: false,
+		admin: false
+	};
+	assert.equal(itemAccent(danmaku), nameColor(42, '甲'));
+
+	const sc = {
+		t: 'sc' as const,
+		id: 2,
+		ts: 1,
+		uid: 7,
+		u: '乙',
+		m: 'y',
+		price: 30,
+		duration: 60,
+		lv: 1,
+		guard: 0,
+		medal: null,
+		colorStart: '#EDF5FF',
+		colorEnd: '#7E57C2',
+		colorBottom: '#5E35B1',
+		fontColor: '#FFFFFF'
+	};
+	assert.equal(itemAccent(sc), '#5E35B1');
+});
+
+test('可见行数与 DOM 上限保持合理关系', () => {
+	assert.equal(VISIBLE_ROWS, 18);
+	assert.equal(MAX_CHAT_ITEMS, 300);
+	assert.ok(MAX_CHAT_ITEMS > VISIBLE_ROWS * 10, 'DOM 上限应远大于可见行数，便于回溯');
+});
+
+/* ==================== 演示事件生成 ==================== */
+
+test('createDemoEvent 在固定节奏上产出三类事件', () => {
+	const kinds = new Set<string>();
+	for (let i = 1; i <= 60; i++) kinds.add(createDemoEvent({ index: i }).t);
+	assert.deepEqual([...kinds].sort(), ['danmaku', 'gift', 'sc']);
+});
+
+test('createDemoEvent 的节奏可预测（不靠随机阈值）', () => {
+	/* 这是修过的 bug：前端 mock 曾只造弹幕，导致 MOCK 模式下礼物/SC 永不出现 */
+	assert.equal(createDemoEvent({ index: 11 }).t, 'sc');
+	assert.equal(createDemoEvent({ index: 22 }).t, 'sc');
+	assert.equal(createDemoEvent({ index: 7 }).t, 'gift');
+	assert.equal(createDemoEvent({ index: 14 }).t, 'gift');
+	assert.equal(createDemoEvent({ index: 1 }).t, 'danmaku');
+	/* 12 的倍数（且非 7/11 的倍数）是超长弹幕，用于验证换行 */
+	const long = createDemoEvent({ index: 12 });
+	assert.equal(long.t, 'danmaku');
+	assert.ok(long.t === 'danmaku' && long.m.length > 40, '第 12 条应为超长弹幕');
+});
+
+test('createDemoEvent 产出的字段足够渲染', () => {
+	const gift = createDemoEvent({ index: 7 });
+	assert.equal(gift.t, 'gift');
+	if (gift.t === 'gift') {
+		assert.ok(gift.g.length > 0, '礼物名');
+		assert.ok(gift.n >= 1, '数量');
+		assert.ok(['gold', 'silver'].includes(gift.coin), '货币类型');
+	}
+
+	const sc = createDemoEvent({ index: 11 });
+	assert.equal(sc.t, 'sc');
+	if (sc.t === 'sc') {
+		assert.ok(sc.price > 0, '金额');
+		assert.ok(sc.m.length > 0, '留言正文');
+		for (const key of ['colorStart', 'colorEnd', 'colorBottom', 'fontColor'] as const) {
+			assert.match(sc[key], /^#[0-9a-fA-F]{6}$/, `${key} 应为 #RRGGBB`);
+		}
+	}
+});
+
+test('createDemoEvent 保留时间戳参数（便于确定性测试）', () => {
+	assert.equal(createDemoEvent({ index: 1, ts: 1234567890 }).ts, 1234567890);
 });
 
 /* ==================== 摇杆几何 ==================== */
@@ -431,13 +605,15 @@ test('Store 回显取最近 N 条且旧→新排序', async () => {
 
 		const echo = await store.readEcho(10);
 		assert.equal(echo.length, 10);
-		assert.equal(echo[0].m, 'msg21');
-		assert.equal(echo[9].m, 'msg30');
+		/* 这批全是弹幕，用类型守卫收窄后断言正文 */
+		const texts = echo.map((e) => (e.t === 'danmaku' ? e.m : ''));
+		assert.equal(texts[0], 'msg21');
+		assert.equal(texts[9], 'msg30');
 		for (let i = 1; i < echo.length; i++) assert.ok(echo[i].ts >= echo[i - 1].ts);
 	});
 });
 
-test('Store 回显只含弹幕，礼物不入回显', async () => {
+test('Store 回显含弹幕/礼物/SC，忽略其余类型', async () => {
 	await withTempDir(async (dir) => {
 		const store = new DanmakuStore({ dataDir: dir, room: '1', flushMs: 5 });
 		store.append(danmaku(1, Date.now(), 'hello'));
@@ -450,13 +626,36 @@ test('Store 回显只含弹幕，礼物不入回显', async () => {
 			g: '小心心',
 			n: 1,
 			price: 0,
-			coin: 'gold'
+			coin: 'gold',
+			lv: 10,
+			guard: 3,
+			medal: ['牌', 5]
+		});
+		store.append({
+			t: 'sc',
+			id: 3,
+			ts: Date.now(),
+			uid: 1,
+			u: 'sc',
+			m: '留言',
+			price: 30,
+			duration: 60,
+			lv: 1,
+			guard: 0,
+			medal: null,
+			colorStart: '#B39DDB',
+			colorEnd: '#7E57C2',
+			colorBottom: '#5E35B1',
+			fontColor: '#FFFFFF'
 		});
 		await store.flush();
 
 		const echo = await store.readEcho(10);
-		assert.equal(echo.length, 1);
-		assert.equal(echo[0].t, 'danmaku');
+		assert.deepEqual(
+			echo.map((e) => e.t),
+			['danmaku', 'gift', 'sc'],
+			'三类可渲染条目都应回显，且保持写入顺序'
+		);
 	});
 });
 

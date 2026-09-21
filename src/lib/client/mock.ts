@@ -1,20 +1,17 @@
 /**
- * 前端 mock 弹幕源（离线开发用）。
+ * 前端 mock 弹幕源（完全离线，不连服务端）。
  *
- * 与服务端的 mock-source 分开：服务端 mock 用于验证「WS → 渲染」整条链路，
- * 这里用于完全没有服务端时也能看样式。
+ * 与服务端 mock 共用 $lib/shared/demo-events 的事件生成逻辑，
+ * 避免两边发散（曾经前端那份只造弹幕，导致 MOCK 模式下礼物/SC 永不出现）。
+ * 服务端 mock 用于验证「WS → 渲染」整条链路，这里用于没有服务端时看样式。
  */
-import { DEMO_LONG_TEXT, DEMO_TEXT, DEMO_USERS } from '$lib/shared/demo';
+import { createDemoEvent } from '$lib/shared/demo-events';
 import type { DanmakuInput } from '$lib/shared/types';
 
 export type MockDanmakuEvent = DanmakuInput;
 
 function randInt(min: number, max: number): number {
 	return min + Math.floor(Math.random() * (max - min + 1));
-}
-
-function pick<T>(arr: readonly T[]): T {
-	return arr[Math.floor(Math.random() * arr.length)];
 }
 
 export class MockDanmakuSource {
@@ -28,22 +25,10 @@ export class MockDanmakuSource {
 		const tick = (): void => {
 			if (this.#stopped) return;
 			this.#index++;
-			this.emit({
-				t: 'danmaku',
-				ts: Date.now(),
-				uid: randInt(1000, 99999),
-				u: pick(DEMO_USERS),
-				m: this.#index % 12 === 0 ? DEMO_LONG_TEXT : pick(DEMO_TEXT),
-				color: 0xffffff,
-				lv: randInt(1, 60),
-				guard: pick([0, 0, 0, 0, 3, 3, 2, 1]),
-				medal: pick([null, null, ['七海', 12] as [string, number]]),
-				vip: Math.random() < 0.2,
-				admin: Math.random() < 0.05
-			});
+			this.emit(createDemoEvent({ index: this.#index }));
 			this.#timer = setTimeout(tick, randInt(400, 1600));
 		};
-		this.#timer = setTimeout(tick, 500);
+		this.#timer = setTimeout(tick, 600);
 	}
 
 	stop(): void {

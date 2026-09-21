@@ -10,11 +10,12 @@
 	 * - 追加/裁剪时用 FLIP 位移动画，保证既有条目平滑上移而不跳变
 	 */
 	import Panel from './Panel.svelte';
-	import { STATE_TEXT } from '$lib/shared/chat';
-	import type { DanmakuEvent, StatusEvent } from '$lib/shared/types';
+	import ChatRow from './ChatRow.svelte';
+	import { STATE_TEXT, itemAccent, pickAccent } from '$lib/shared/chat';
+	import type { DanmakuItem, StatusEvent } from '$lib/shared/types';
 
 	interface Props {
-		items: DanmakuEvent[];
+		items: DanmakuItem[];
 		/** 连接状态，用于标题栏指示灯 */
 		live?: StatusEvent;
 		/** 真实房间号 */
@@ -97,9 +98,20 @@
 
 	<div class="chat-list" bind:this={listEl}>
 		{#each visible as item (item.id)}
-			<div class="chat-row in" data-id={item.id}>
-				<span class="chat-user">{item.u}</span>
-				<span class="chat-text">{item.m}</span>
+			<!--
+				强调色与 SC 主题色必须设在 .chat-row 上：
+				左侧色条是它的 ::before，而自定义属性只向下继承。
+			-->
+			<div
+				class="chat-row in"
+				data-id={item.id}
+				data-kind={item.t}
+				data-coin={item.t === 'gift' ? item.coin : undefined}
+				style="--row-accent:{itemAccent(item)}{item.t === 'sc'
+					? `;--sc:${pickAccent(item.colorBottom, item.colorEnd, item.colorStart)}`
+					: ''}"
+			>
+				<ChatRow {item} />
 			</div>
 		{/each}
 </div>

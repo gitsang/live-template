@@ -11,7 +11,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
-import type { DanmakuEvent, DanmakuItem } from '$lib/shared/types';
+import type { DanmakuItem } from '$lib/shared/types';
 import { createLogger } from './logger';
 
 const log = createLogger('store');
@@ -125,12 +125,12 @@ export class DanmakuStore {
 	}
 
 	/**
-	 * 读取最近 N 条弹幕用于回显。
+	 * 读取最近 N 条可渲染条目用于回显。
 	 *
-	 * 从文件尾部往前读，避免把当天所有弹幕都载入内存。
-	 * 只回显弹幕（不含礼物），且只回显当天。
+	 * 从文件尾部往前读，避免把当天所有条目都载入内存。
+	 * 含弹幕 / 礼物 / SC（三者都能渲染）；其余忽略。只回显当天。
 	 */
-	async readEcho(count: number): Promise<DanmakuEvent[]> {
+	async readEcho(count: number): Promise<DanmakuItem[]> {
 		const file = this.filePath();
 		let lines: string[];
 		try {
@@ -140,13 +140,14 @@ export class DanmakuStore {
 			return [];
 		}
 
-		const out: DanmakuEvent[] = [];
+		const RENDERABLE = new Set(['danmaku', 'gift', 'sc']);
+		const out: DanmakuItem[] = [];
 		for (let i = lines.length - 1; i >= 0 && out.length < count; i--) {
 			const line = lines[i].trim();
 			if (!line) continue;
 			try {
 				const item = JSON.parse(line) as DanmakuItem;
-				if (item.t === 'danmaku') out.push(item);
+				if (RENDERABLE.has(item.t)) out.push(item);
 			} catch {
 				/* 跳过损坏行（例如进程被强杀时写了一半） */
 			}

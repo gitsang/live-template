@@ -10,8 +10,6 @@
  */
 import type { DanmakuInput, DanmakuItem, StatusEvent } from '$lib/shared/types';
 
-export type BusEvent = DanmakuItem | StatusEvent;
-
 export interface ReplayResult {
 	/** 需要补发的事件（已按 id 升序） */
 	events: DanmakuItem[];

@@ -11,7 +11,7 @@
 import { DanmakuClient } from './ws';
 import { MockDanmakuSource } from './mock';
 import { MAX_CHAT_ITEMS } from '$lib/shared/chat';
-import type { DanmakuEvent, RoomState, StatusEvent } from '$lib/shared/types';
+import type { DanmakuItem, RoomState, StatusEvent } from '$lib/shared/types';
 
 export interface DanmakuFeedOptions {
 	room: string;
@@ -22,7 +22,7 @@ export interface DanmakuFeedOptions {
 }
 
 export interface DanmakuFeed {
-	readonly items: DanmakuEvent[];
+	readonly items: DanmakuItem[];
 	readonly status: StatusEvent;
 	readonly realRoom: string;
 	stop(): void;
@@ -31,14 +31,14 @@ export interface DanmakuFeed {
 export function createDanmakuFeed(options: DanmakuFeedOptions): DanmakuFeed {
 	const max = options.max ?? MAX_CHAT_ITEMS;
 
-	let items = $state<DanmakuEvent[]>([]);
+	let items = $state<DanmakuItem[]>([]);
 	let status = $state<StatusEvent>({ t: 'status', s: 'idle' });
 	/* 真实房间号，服务端解析短号后回填 */
 	let realRoom = $state('');
 	/* 本地 mock 的事件 id */
 	let mockId = 0;
 
-	const push = (event: DanmakuEvent): void => {
+	const push = (event: DanmakuItem): void => {
 		/* 数组整体替换：ChatBox 依赖引用变化触发 FLIP */
 		items = items.length >= max ? [...items.slice(1 - max + 1), event] : [...items, event];
 	};
@@ -47,7 +47,7 @@ export function createDanmakuFeed(options: DanmakuFeedOptions): DanmakuFeed {
 	if (options.mock) {
 		const src = new MockDanmakuSource((event) => {
 			/* 本地 mock 没有服务端 id，这里补一个自增 id 供 {#each} 做 key */
-			if (event.t === 'danmaku') push({ ...event, id: ++mockId });
+			push({ ...event, id: ++mockId });
 		});
 		src.start();
 		status = { t: 'status', s: 'connected', room: 0, host: 'MOCK', live: 1 };
@@ -79,7 +79,7 @@ export function createDanmakuFeed(options: DanmakuFeedOptions): DanmakuFeed {
 			status = s;
 			if (s.room) realRoom = String(s.room);
 		},
-		onDanmaku: push
+		onItem: push
 	});
 
 	const stop = client.start();

@@ -9,7 +9,7 @@
  */
 import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { ClientMessage, DanmakuEvent, DanmakuItem, ServerMessage } from '$lib/shared/types';
+import type { ClientMessage, DanmakuItem, ServerMessage } from '$lib/shared/types';
 import type { RoomHub, RoomSession } from './hub';
 import { createLogger } from './logger';
 
@@ -194,7 +194,7 @@ export class DanmakuWsServer {
 		const pending: DanmakuItem[] = [];
 		let ready = false;
 
-		let echo: DanmakuEvent[] = [];
+		let echo: DanmakuItem[] = [];
 		if (freshPage) {
 			try {
 				echo = await session.echo();

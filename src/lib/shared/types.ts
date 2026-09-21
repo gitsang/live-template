@@ -34,7 +34,7 @@ export interface DanmakuEvent extends Base {
 	admin: boolean;
 }
 
-/** 礼物。本期仅落盘不渲染，为 v2 预留。 */
+/** 礼物 */
 export interface GiftEvent extends Base {
 	t: 'gift';
 	uid: number;
@@ -45,11 +45,57 @@ export interface GiftEvent extends Base {
 	n: number;
 	/** 总价值（金瓜子） */
 	price: number;
-	/** 货币类型 gold / silver */
+	/** 货币类型 gold（金瓜子）/ silver（银瓜子） */
 	coin: string;
+	/** 用户等级 UL */
+	lv: number;
+	/** 舰长等级：0 无 / 1 总督 / 2 提督 / 3 舰长 */
+	guard: number;
+	/** 粉丝牌 [名称, 等级] */
+	medal: [string, number] | null;
 }
 
-export type DanmakuItem = DanmakuEvent | GiftEvent;
+/**
+ * 醒目留言（Super Chat）。
+ *
+ * 颜色字段来自 B 站下发的 SC 主题：`colorStart/colorEnd` 是渐变两端，
+ * `colorBottom` 是底栏色。它们通常是浅色（面向 B 站浅色主题），
+ * 直接当背景会和本项目的深色像素风冲突，因此渲染时只取其中较深的一个
+ * 作为强调色，背景仍用深色底。
+ */
+export interface SuperChatEvent extends Base {
+	t: 'sc';
+	uid: number;
+	u: string;
+	/** 留言正文 */
+	m: string;
+	/** 金额（人民币元） */
+	price: number;
+	/** 持续时间（秒） */
+	duration: number;
+	/** 用户等级 UL */
+	lv: number;
+	/** 舰长等级：0 无 / 1 总督 / 2 提督 / 3 舰长 */
+	guard: number;
+	/** 粉丝牌 [名称, 等级] */
+	medal: [string, number] | null;
+	/** 渐变起始色（#RRGGBB） */
+	colorStart: string;
+	/** 渐变结束色（#RRGGBB） */
+	colorEnd: string;
+	/** 底栏色（#RRGGBB） */
+	colorBottom: string;
+	/** 正文字体色（#RRGGBB） */
+	fontColor: string;
+}
+
+export type DanmakuItem = DanmakuEvent | GiftEvent | SuperChatEvent;
+
+/** 聊天框可渲染的条目类型 */
+export type DanmakuKind = DanmakuItem['t'];
+
+/** 从联合类型里按 t 取出具体成员 */
+export type ItemOf<T extends DanmakuKind> = Extract<DanmakuItem, { t: T }>;
 
 /**
  * 尚未分配事件 id 的条目。
@@ -58,7 +104,10 @@ export type DanmakuItem = DanmakuEvent | GiftEvent;
  * 后者作用在联合类型上会坍缩成各成员的**公共键**，弹幕独有的 m/lv 等
  * 会被丢掉，导致 publish() 拒绝正确的输入。
  */
-export type DanmakuInput = Omit<DanmakuEvent, 'id'> | Omit<GiftEvent, 'id'>;
+export type DanmakuInput =
+	| Omit<DanmakuEvent, 'id'>
+	| Omit<GiftEvent, 'id'>
+	| Omit<SuperChatEvent, 'id'>;
 
 /** 房间连接状态 */
 export type RoomState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error';
@@ -86,8 +135,8 @@ export interface HelloMessage {
 	room: string;
 	/** 当前状态，避免新连接等待下一次变更 */
 	latest: StatusEvent;
-	/** 从当天 JSONL 读出的回显弹幕，旧 → 新 */
-	echo: DanmakuEvent[];
+	/** 从当天 JSONL 读出的回显条目（含弹幕/礼物/SC），旧 → 新 */
+	echo: DanmakuItem[];
 }
 
 /** 弹幕推送 */
