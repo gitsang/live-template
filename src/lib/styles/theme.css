@@ -1,0 +1,977 @@
+/* =============================================================
+   像素风直播间框体 —— 共享样式
+   从 statics/basic-framework.html 抽出，视觉保持一致。
+
+   画布固定 1920×1080，等比缩放铺满窗口。
+   四个预留框：视频框 / 公告框 / 聊天框 / 手柄操作框。
+
+   数值以 src/lib/shared/geometry.ts 为准，组件会把它们写成
+   内联 style 上的自定义属性覆盖下面 :root 的默认值。
+   ============================================================= */
+
+:root {
+	/* ---- 版面（与 geometry.ts 同值的静态镜像） ---- */
+	--w: 1920;
+	--h: 1080;
+	--pad: 28;
+	--gap: 18;
+	--right: 480;
+	--pad-h: 340;
+	--hd: 30;
+	--bw: 3;
+
+	/* ---- 像素风配色 ---- */
+	--page: #05070d; /* 浏览器留白区 */
+	--scene-1: #1b2440; /* 画布渐变亮部 */
+	--scene-2: #0d1120;
+	--scene-3: #07090f;
+	--panel: #151a2b; /* 面板底色 */
+	--panel-2: #1e2540; /* 标题栏底色 */
+	--edge-lt: #6b7bb5; /* 亮边框 */
+	--edge-dk: #0a0d17; /* 暗边框 */
+	--slot: #000000; /* 预留区：纯黑 */
+
+	/* ---- 每个框的强调色 ---- */
+	--cy: #4de2ff; /* 视频框 · 青 */
+	--yl: #ffd93d; /* 公告框 · 黄 */
+	--gr: #5ef08a; /* 聊天框 · 绿 */
+	--mg: #ff4d9d; /* 手柄框 · 品红 */
+
+	/* ---- 强调色兜底，避免未设置时颜色失效 ---- */
+	--accent: var(--cy);
+}
+
+* {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html,
+body {
+	height: 100%;
+}
+
+body {
+	background: var(--page);
+	font-family:
+		'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', -apple-system, 'Segoe UI', system-ui,
+		sans-serif;
+	overflow: hidden;
+	-webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 缩放容器 ---------- */
+.viewport {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	overflow: hidden;
+}
+
+.canvas {
+	width: calc(var(--w) * 1px);
+	height: calc(var(--h) * 1px);
+	flex: 0 0 auto;
+	position: relative;
+	overflow: hidden;
+	transform-origin: center center;
+	background: radial-gradient(
+		125% 95% at 50% 0%,
+		var(--scene-1) 0%,
+		var(--scene-2) 52%,
+		var(--scene-3) 100%
+	);
+}
+
+/* CRT 扫描线 */
+.canvas::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	z-index: 60;
+	background: repeating-linear-gradient(
+		to bottom,
+		rgba(255, 255, 255, 0.035) 0 1px,
+		transparent 1px 3px
+	);
+}
+
+/* 四角像素刻度（装饰） */
+.canvas::before {
+	content: '';
+	position: absolute;
+	inset: 10px;
+	pointer-events: none;
+	z-index: 61;
+	background:
+		linear-gradient(var(--edge-lt), var(--edge-lt)) 0 0 / 22px 4px no-repeat,
+		linear-gradient(var(--edge-lt), var(--edge-lt)) 0 0 / 4px 22px no-repeat,
+		linear-gradient(var(--edge-lt), var(--edge-lt)) 100% 0 / 22px 4px no-repeat,
+		linear-gradient(var(--edge-lt), var(--edge-lt)) 100% 0 / 4px 22px no-repeat,
+		linear-gradient(var(--edge-lt), var(--edge-lt)) 0 100% / 22px 4px no-repeat,
+		linear-gradient(var(--edge-lt), var(--edge-lt)) 0 100% / 4px 22px no-repeat,
+		linear-gradient(var(--edge-lt), var(--edge-lt)) 100% 100% / 22px 4px no-repeat,
+		linear-gradient(var(--edge-lt), var(--edge-lt)) 100% 100% / 4px 22px no-repeat;
+	opacity: 0.35;
+}
+
+/* 透明背景模式：画布与留白区全透明，只留像素外框，供 OBS 叠加 */
+html.bg-transparent,
+html.bg-transparent body {
+	background: transparent;
+}
+
+html.bg-transparent {
+	--page: transparent;
+}
+
+html.bg-transparent .canvas {
+	background: transparent;
+}
+
+html.bg-transparent .canvas::after,
+html.bg-transparent .canvas::before {
+	display: none;
+}
+
+/* ---------- 版面 ---------- */
+.scene {
+	position: absolute;
+	inset: calc(var(--pad) * 1px);
+	display: flex;
+	gap: calc(var(--gap) * 1px);
+}
+
+.col-left {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: calc(var(--gap) * 1px);
+}
+
+.col-right {
+	flex: 0 0 calc(var(--right) * 1px);
+	display: flex;
+	flex-direction: column;
+	gap: calc(var(--gap) * 1px);
+}
+
+/* ---------- 像素面板 ---------- */
+.slot {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	background: var(--panel);
+	border: calc(var(--bw) * 1px) solid var(--edge-dk);
+	border-radius: 0;
+	box-shadow:
+		0 0 0 calc(var(--bw) * 1px) var(--edge-lt),
+		8px 8px 0 rgba(0, 0, 0, 0.55);
+}
+
+/* 高度由 geometry.ts 内联给出，这里只做兜底 */
+.slot-video {
+	flex: 0 0 auto;
+	height: var(--video-h, 801px);
+}
+
+.slot-notice {
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.slot-chat {
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.slot-pad {
+	flex: 0 0 calc(var(--pad-h) * 1px);
+}
+
+/* ---------- 标题栏 ---------- */
+.hd {
+	position: relative;
+	flex: 0 0 calc(var(--hd) * 1px);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 0 11px;
+	background: var(--panel-2);
+	box-shadow: inset 0 -12px 0 rgba(0, 0, 0, 0.16);
+}
+
+/* 底部糖果条（像素虚线） */
+.hd::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 3px;
+	background-image: repeating-linear-gradient(
+		90deg,
+		var(--accent) 0 6px,
+		rgba(0, 0, 0, 0.45) 6px 12px
+	);
+}
+
+.hd .sprite {
+	flex: 0 0 auto;
+	width: 22px;
+	height: 17px;
+}
+
+.hd .sprite svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+.hd .en {
+	font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Courier New', monospace;
+	font-size: 13px;
+	font-weight: 700;
+	letter-spacing: 2.6px;
+	color: var(--accent);
+	text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.65);
+}
+
+.hd .cn {
+	font-size: 12.5px;
+	letter-spacing: 1.2px;
+	color: rgba(255, 255, 255, 0.46);
+}
+
+.hd .dim {
+	margin-left: auto;
+	font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Courier New', monospace;
+	font-size: 11.5px;
+	letter-spacing: 0.6px;
+	color: rgba(255, 255, 255, 0.34);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+html.label-off .hd .sprite,
+html.label-off .hd .en,
+html.label-off .hd .cn {
+	visibility: hidden;
+}
+
+/* 连接状态指示灯（聊天框标题栏） */
+.status-dot {
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	margin-right: 5px;
+	vertical-align: middle;
+	background: currentColor;
+	box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.status-connected {
+	color: #5ef08a;
+}
+
+.status-connecting,
+.status-reconnecting {
+	color: #ffd93d;
+}
+
+.status-error {
+	color: #ff5c72;
+}
+
+.status-offline {
+	color: rgba(255, 255, 255, 0.28);
+}
+
+/* ---------- 预留区（纯黑） ---------- */
+.body {
+	flex: 1 1 auto;
+	min-height: 0;
+	position: relative;
+	background: var(--slot);
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.055);
+	overflow: hidden;
+}
+
+.slot-video .body {
+	flex: 0 0 auto;
+	height: calc(var(--video-h, 801px) - var(--hd) * 1px - var(--bw) * 2px);
+}
+
+/* 视频框透明洞：让 OBS 下方的显示器采集透出来。
+   注意只作用于视频框，画布底纹与留白区保持不透明，游戏不会从缝隙漏出。 */
+html.hole-on .slot-video .body {
+	background: transparent;
+	box-shadow: none;
+}
+
+/* ---------- 参考线层 ---------- */
+.guide {
+	display: none;
+}
+
+html.guide-on .guide {
+	display: block;
+}
+
+.brk {
+	position: absolute;
+	width: 34px;
+	height: 34px;
+	border: 0 solid var(--accent);
+	opacity: 0.42;
+}
+
+.brk.tl {
+	top: 14px;
+	left: 14px;
+	border-top-width: 4px;
+	border-left-width: 4px;
+}
+
+.brk.tr {
+	top: 14px;
+	right: 14px;
+	border-top-width: 4px;
+	border-right-width: 4px;
+}
+
+.brk.bl {
+	bottom: 14px;
+	left: 14px;
+	border-bottom-width: 4px;
+	border-left-width: 4px;
+}
+
+.brk.br {
+	bottom: 14px;
+	right: 14px;
+	border-bottom-width: 4px;
+	border-right-width: 4px;
+}
+
+.slot-notice .brk {
+	width: 20px;
+	height: 20px;
+}
+
+.slot-notice .brk.tl,
+.slot-notice .brk.tr {
+	top: 10px;
+}
+
+.slot-notice .brk.bl,
+.slot-notice .brk.br {
+	bottom: 10px;
+}
+
+/* 手柄键位底图水印 */
+.padhint {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	opacity: 0.9;
+	pointer-events: none;
+}
+
+html.guide-on .slot {
+	outline: 1px dashed rgba(255, 255, 255, 0.1);
+	outline-offset: -7px;
+}
+
+/* =============================================================
+   聊天框
+   474×630 内容区，16px / 1.6 → 可见约 23 行。
+   上旧下新，超出高度才滚动（自动吸底），长文换行。
+   ============================================================= */
+.chat-list {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end; /* 内容不足时贴底，超长时从顶部溢出 */
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding: 8px 10px;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(94, 240, 138, 0.35) transparent;
+}
+
+.chat-list::-webkit-scrollbar {
+	width: 6px;
+}
+
+.chat-list::-webkit-scrollbar-thumb {
+	background: rgba(94, 240, 138, 0.35);
+}
+
+.chat-list::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.chat-row {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: baseline;
+	gap: 7px;
+	padding: 3px 6px 3px 9px;
+	font-size: 16px;
+	line-height: 1.6;
+	color: #ffffff;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+	position: relative;
+}
+
+/* 左侧强调色竖条 */
+.chat-row::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 6px;
+	bottom: 6px;
+	width: 3px;
+	background: var(--accent);
+	opacity: 0.55;
+}
+
+.chat-user {
+	flex: 0 0 auto;
+	max-width: 45%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: rgba(94, 240, 138, 0.86);
+	font-size: 14px;
+	letter-spacing: 0.4px;
+}
+
+.chat-text {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+/* 进场：淡入（steps 保像素感） */
+.chat-row.in {
+	animation: chat-in 200ms steps(6, end) both;
+}
+
+@keyframes chat-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+/* 位移过渡：数组整体重排时平滑移动（FLIP 的 transition 部分） */
+.chat-row.shifting {
+	transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.chat-empty {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	font-size: 14px;
+	letter-spacing: 1.5px;
+	color: rgba(255, 255, 255, 0.22);
+	font-family: ui-monospace, Consolas, monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-row.in {
+		animation-duration: 1ms;
+	}
+}
+
+/* =============================================================
+   手柄操作框
+   474×304 内容区。仅显示「当前按下」，无输入时整框半透明。
+   ============================================================= */
+.pad-body {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	transition: opacity 220ms ease;
+}
+
+/* 无手柄 / 全部松开 → 半透明 */
+.pad-body.idle {
+	opacity: 0.55;
+}
+
+/* ---- 肩键 + 扳机 ---- */
+.pad-triggers {
+	flex: 0 0 34px;
+	display: flex;
+	gap: 6px;
+	padding: 4px 6px 0;
+}
+
+.pad-side {
+	flex: 1 1 0;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.pad-bumper {
+	flex: 0 0 auto;
+	height: 15px;
+	min-width: 44px;
+	padding: 0 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 10px;
+	letter-spacing: 0.8px;
+	color: rgba(255, 255, 255, 0.38);
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.pad-trigger {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.pad-trigger-label {
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 10px;
+	color: rgba(255, 255, 255, 0.38);
+}
+
+.pad-bar {
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 9px;
+	background: rgba(255, 255, 255, 0.07);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	position: relative;
+	overflow: hidden;
+}
+
+.pad-bar > i {
+	display: block;
+	height: 100%;
+	width: 0%;
+	background: var(--accent);
+	opacity: 0.85;
+}
+
+.pad-trigger-value {
+	flex: 0 0 auto;
+	width: 26px;
+	text-align: right;
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 10px;
+	color: rgba(255, 255, 255, 0.32);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ---- 主体：左摇杆/十字 · 中键 · ABXY/右摇杆 ---- */
+.pad-main {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 8px 4px;
+}
+
+.pad-wing {
+	flex: 1 1 0;
+	min-width: 0;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: space-around;
+}
+
+.pad-center {
+	flex: 0 0 auto;
+	width: 54px;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+}
+
+/* ---- 摇杆 ---- */
+.pad-stick {
+	position: relative;
+	width: 78px;
+	height: 78px;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.045);
+	border: 2px solid rgba(255, 255, 255, 0.12);
+	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+	flex: 0 0 auto;
+}
+
+/* 中心十字刻度 */
+.pad-stick::before,
+.pad-stick::after {
+	content: '';
+	position: absolute;
+	background: rgba(255, 255, 255, 0.09);
+}
+
+.pad-stick::before {
+	left: 50%;
+	top: 8px;
+	bottom: 8px;
+	width: 1px;
+	transform: translateX(-50%);
+}
+
+.pad-stick::after {
+	top: 50%;
+	left: 8px;
+	right: 8px;
+	height: 1px;
+	transform: translateY(-50%);
+}
+
+.pad-stick > i {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 24px;
+	height: 24px;
+	margin: -12px 0 0 -12px;
+	background: var(--accent);
+	opacity: 0.5;
+	transition:
+		transform 40ms linear,
+		opacity 120ms ease;
+	will-change: transform;
+}
+
+.pad-stick.pushed > i {
+	opacity: 1;
+}
+
+.pad-stick.pushed {
+	border-color: var(--accent);
+}
+
+/* 摇杆按下（L3/R3） */
+.pad-stick > b {
+	position: absolute;
+	left: 50%;
+	bottom: -16px;
+	transform: translateX(-50%);
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 9.5px;
+	letter-spacing: 0.8px;
+	color: rgba(255, 255, 255, 0.3);
+	font-weight: 400;
+}
+
+.pad-stick.pushed > b,
+.pad-stick.pressed > b {
+	color: var(--accent);
+}
+
+/* ---- 十字键 ---- */
+.pad-dpad {
+	display: grid;
+	grid-template-columns: repeat(3, 24px);
+	grid-template-rows: repeat(3, 24px);
+	flex: 0 0 auto;
+}
+
+.pad-dpad button {
+	appearance: none;
+	background: rgba(255, 255, 255, 0.07);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	padding: 0;
+	position: relative;
+}
+
+.pad-dpad button.on {
+	background: var(--accent);
+	border-color: var(--accent);
+	box-shadow: 0 0 8px -2px var(--accent);
+}
+
+.pad-dpad .d-up {
+	grid-area: 1 / 2;
+}
+
+.pad-dpad .d-left {
+	grid-area: 2 / 1;
+}
+
+.pad-dpad .d-center {
+	grid-area: 2 / 2;
+	background: rgba(255, 255, 255, 0.035);
+}
+
+.pad-dpad .d-right {
+	grid-area: 2 / 3;
+}
+
+.pad-dpad .d-down {
+	grid-area: 3 / 2;
+}
+
+/* ---- ABXY ---- */
+.pad-face {
+	display: grid;
+	grid-template-columns: repeat(3, 26px);
+	grid-template-rows: repeat(3, 26px);
+	flex: 0 0 auto;
+}
+
+.pad-face button {
+	appearance: none;
+	display: grid;
+	place-items: center;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.06);
+	border: 2px solid rgba(255, 255, 255, 0.13);
+	color: rgba(255, 255, 255, 0.4);
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 12px;
+	font-weight: 700;
+	padding: 0;
+	transition: none;
+}
+
+.pad-face button.on {
+	color: #12141d;
+}
+
+/* 每个键的语义色（押下即用该色点亮） */
+.pad-face .f-y {
+	grid-area: 1 / 2;
+	--key: #ffd93d;
+}
+
+.pad-face .f-x {
+	grid-area: 2 / 1;
+	--key: #4de2ff;
+}
+
+.pad-face .f-b {
+	grid-area: 2 / 3;
+	--key: #ff5c72;
+}
+
+.pad-face .f-a {
+	grid-area: 3 / 2;
+	--key: #5ef08a;
+}
+
+.pad-face button.on {
+	background: var(--key);
+	border-color: var(--key);
+	box-shadow: 0 0 10px -2px var(--key);
+}
+
+/* ---- 中键 ---- */
+.pad-mini {
+	appearance: none;
+	min-width: 42px;
+	height: 16px;
+	padding: 0 5px;
+	display: grid;
+	place-items: center;
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 8.5px;
+	letter-spacing: 0.6px;
+	color: rgba(255, 255, 255, 0.34);
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	white-space: nowrap;
+}
+
+.pad-mini.on {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: #12141d;
+}
+
+.pad-mini.guide {
+	min-width: 28px;
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	font-size: 10px;
+}
+
+/* ---- 无手柄提示 ---- */
+.pad-hint {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	pointer-events: none;
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 12.5px;
+	letter-spacing: 1.6px;
+	color: rgba(255, 255, 255, 0.62);
+	text-align: center;
+	line-height: 1.9;
+	animation: pad-hint 2.2s steps(12, end) infinite;
+}
+
+@keyframes pad-hint {
+	0%,
+	100% {
+		opacity: 0.32;
+	}
+	50% {
+		opacity: 0.95;
+	}
+}
+
+/* =============================================================
+   独立单框页（/only/<box>）
+   精确像素盒子，填充视口，无画布缩放、无 HUD，OBS 里可直接填宽高。
+   ============================================================= */
+.only-page {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	place-items: stretch;
+	background: var(--slot);
+}
+
+.only-page.bg-transparent {
+	background: transparent;
+}
+
+.only-page .slot {
+	width: 100%;
+	height: 100%;
+	box-shadow: none; /* 单框无画布，硬投影会溢出被裁 */
+}
+
+.only-page .slot,
+.only-page .col-left,
+.only-page .col-right {
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+/* 单框页里视频/手柄框不再固定高度 */
+.only-page .slot-video,
+.only-page .slot-pad {
+	flex: 1 1 auto;
+	height: auto;
+}
+
+.only-page .slot-video .body,
+.only-page .slot .body {
+	flex: 1 1 auto;
+	height: auto;
+}
+
+/* =============================================================
+   调试控制条（HUD）
+   仅本地调试用，鼠标移动才出现；OBS 浏览器源不派发鼠标事件，
+   且整页 HUD 默认关闭（配置项 hud）。
+   ============================================================= */
+.hud {
+	position: fixed;
+	left: 50%;
+	bottom: 22px;
+	transform: translate(-50%, 20px);
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 12px;
+	background: rgba(14, 17, 29, 0.95);
+	border: 2px solid var(--edge-dk);
+	box-shadow:
+		0 0 0 2px rgba(255, 255, 255, 0.12),
+		8px 8px 0 rgba(0, 0, 0, 0.55);
+	opacity: 0;
+	pointer-events: none;
+	transition: 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+	z-index: 99;
+	font-size: 12.5px;
+	color: #cfd4e6;
+}
+
+.hud.on {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translate(-50%, 0);
+}
+
+.hud button {
+	height: 30px;
+	padding: 0 12px;
+	cursor: pointer;
+	background: #1b2136;
+	border: 2px solid var(--edge-dk);
+	box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+	color: #cfd4e6;
+	font-size: 12.5px;
+	font-family: inherit;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	transition: 0.15s;
+	white-space: nowrap;
+}
+
+.hud button:hover {
+	background: #252c47;
+	color: #fff;
+}
+
+.hud button.on {
+	background: var(--cy);
+	color: #052330;
+	border-color: #0a2a38;
+	box-shadow: 0 0 0 2px rgba(77, 226, 255, 0.45);
+	font-weight: 700;
+}
+
+.hud .sep {
+	width: 2px;
+	height: 18px;
+	background: rgba(255, 255, 255, 0.14);
+	margin: 0 3px;
+}
+
+.hud .tip {
+	color: #868ca4;
+	padding: 0 6px;
+	white-space: nowrap;
+}
+
+.hud kbd {
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 11px;
+	padding: 1px 5px;
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	color: #c8ccdd;
+}
