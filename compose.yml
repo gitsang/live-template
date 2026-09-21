@@ -1,0 +1,29 @@
+services:
+  live-template:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: live-template:latest
+    container_name: live-template
+    restart: unless-stopped
+    ports:
+      # 左侧是宿主机端口，可用 HOST_PORT 覆盖
+      - '${HOST_PORT:-8080}:8080'
+    environment:
+      # 必须固定时区：弹幕按天落盘（data/room-<id>/YYYY-MM-DD.jsonl）依赖本地时间，
+      # 容器默认 UTC 会让北京时间 08:00 之前的弹幕归到前一天。
+      TZ: Asia/Shanghai
+      # B 站直播间号，支持短号（服务端自动解析为真实房间号）
+      ROOM_ID: '${ROOM_ID:-90932}'
+      # 造弹幕 + 造手柄输入，无需联网/手柄；生产应保持 0
+      MOCK: '${MOCK:-0}'
+      # 调试控制条，OBS 中应保持 0
+      HUD: '${HUD:-0}'
+      # 视频框透明洞（默认开）：让 OBS 下方的显示器采集透出
+      VIDEO_HOLE: '${VIDEO_HOLE:-1}'
+      LOG_LEVEL: '${LOG_LEVEL:-info}'
+    volumes:
+      # 弹幕归档持久化（重启后仍能回显）
+      - ./data:/app/data
+    # 若 OBS 在宿主机、服务在容器内，用 host 网络可避免额外的端口映射问题
+    # network_mode: host
