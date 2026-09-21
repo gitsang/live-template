@@ -11,7 +11,7 @@
 	import Panel from './Panel.svelte';
 	import { GamepadReader } from '$lib/client/gamepad';
 	import { PadMockReader } from '$lib/client/pad-mock';
-	import type { PadState } from '$lib/shared/pad';
+	import { stickTransform, type PadState } from '$lib/shared/pad';
 
 	interface Props {
 		guides?: boolean;
@@ -52,12 +52,8 @@
 		return { pct: `${(val * 100).toFixed(0)}%`, num: `${Math.round(val * 100)}` };
 	}
 
-	/** 摇杆偏移百分比（-1 → 1 映射到 0% → 100%） */
-	function stick(x: number, y: number): string {
-		const px = ((x + 1) / 2) * 100;
-		const py = ((y + 1) / 2) * 100;
-		return `translate(calc(${px}% - 50%), calc(${py}% - 50%))`;
-	}
+	/* 摇杆圆点位移按像素计算，具体原因见 shared/pad.ts 的 STICK_MAX_TRAVEL */
+	const stick = stickTransform;
 
 	const [lx, ly, rx, ry] = $derived(state.axes);
 	const lMag = $derived(Math.hypot(lx, ly));

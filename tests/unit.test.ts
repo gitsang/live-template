@@ -17,6 +17,14 @@ import { wbiMixinKey, wbiSign } from '../src/lib/server/bili/api.ts';
 import { DanmakuStore, localDateKey } from '../src/lib/server/store.ts';
 import { EventBus } from '../src/lib/server/eventbus.ts';
 import { randomQueueUuid } from '../src/lib/server/bili/client.ts';
+import {
+	STICK_BORDER,
+	STICK_DOT_SIZE,
+	STICK_MAX_TRAVEL,
+	STICK_SIZE,
+	applyDeadzone,
+	stickTransform
+} from '../src/lib/shared/pad.ts';
 
 let passed = 0;
 const cases: Array<[string, () => void | Promise<void>]> = [];
@@ -189,6 +197,42 @@ test('randomQueueUuid 是 8 位小写字母数字', () => {
 test('randomQueueUuid 有足够随机性（连续两次不同）', () => {
 	const set = new Set(Array.from({ length: 100 }, () => randomQueueUuid()));
 	assert.ok(set.size > 90, `期望基本不重复，实际 ${set.size}/100`);
+});
+
+/* ==================== 摇杆几何 ==================== */
+
+test('摇杆圆点行程按像素算，而不是圆点自身的百分比', () => {
+	/* 回归测试：曾用 translate(100% - 50%)，百分比基于 24px 的圆点，
+	   实际只移动 12px，跑不满 78px 的摇杆。 */
+	assert.equal(STICK_MAX_TRAVEL, STICK_SIZE / 2 - STICK_BORDER - STICK_DOT_SIZE / 2);
+	assert.equal(STICK_MAX_TRAVEL, 25);
+	assert.ok(STICK_MAX_TRAVEL > STICK_DOT_SIZE / 2, '行程应明显大于圆点半径');
+});
+
+test('stickTransform 输出像素且拉满时到达边界', () => {
+	assert.equal(stickTransform(0, 0), 'translate(0.00px, 0.00px)');
+	assert.equal(stickTransform(1, 0), `translate(${STICK_MAX_TRAVEL}.00px, 0.00px)`);
+	assert.equal(stickTransform(0, -1), `translate(0.00px, ${-STICK_MAX_TRAVEL}.00px)`);
+	/* 任意方向不超过最大行程 */
+	for (const [x, y] of [[1, 1], [-1, -1], [0.5, -0.5], [1, -1]]) {
+		const m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(stickTransform(x, y));
+		assert.ok(m, '格式应为 translate(Npx, Npx)');
+		assert.ok(Math.abs(Number(m[1])) <= STICK_MAX_TRAVEL + 1e-9);
+		assert.ok(Math.abs(Number(m[2])) <= STICK_MAX_TRAVEL + 1e-9);
+	}
+});
+
+test('applyDeadzone 把死区内的值归零并平滑放大其余值', () => {
+	assert.equal(applyDeadzone(0), 0);
+	assert.equal(applyDeadzone(0.05), 0, '死区内归零');
+	assert.equal(applyDeadzone(-0.05), 0);
+	/* 刚好越过死区时从 0 连续起步 */
+	assert.ok(applyDeadzone(0.09) > 0 && applyDeadzone(0.09) < 0.05);
+	/* 拉满仍是 1 */
+	assert.equal(applyDeadzone(1), 1);
+	assert.equal(applyDeadzone(-1), -1);
+	/* 单调 */
+	assert.ok(applyDeadzone(0.5) > applyDeadzone(0.3));
 });
 
 /* ==================== 事件总线 ==================== */

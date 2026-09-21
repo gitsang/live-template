@@ -49,6 +49,27 @@ export const AXES = { LX: 0, LY: 1, RX: 2, RY: 3 } as const;
 /** 摇杆死区：低于此幅度视为未推动，避免漂移误报 */
 export const DEADZONE = 0.08;
 
+/*
+ * 摇杆可视几何（与 theme.css 中的 .pad-stick 保持一致）。
+ * 圆点的最大行程必须按像素算：
+ *   行程 = 摇杆半径 − 边框 − 圆点半径
+ * 若改用 translate(100%) 之类的百分比，百分比会基于圆点自身尺寸（24px）
+ * 而不是摇杆，行程会明显偏小（实测只有 12px，跑不满摇杆）。
+ */
+export const STICK_SIZE = 78;
+export const STICK_BORDER = 2;
+export const STICK_DOT_SIZE = 24;
+
+/** 摇杆圆点从中心出发的最大偏移（像素） */
+export const STICK_MAX_TRAVEL = STICK_SIZE / 2 - STICK_BORDER - STICK_DOT_SIZE / 2;
+
+/** 把归一化的摇杆轴值换算成圆点的 CSS transform */
+export function stickTransform(x: number, y: number): string {
+	const dx = (x * STICK_MAX_TRAVEL).toFixed(2);
+	const dy = (y * STICK_MAX_TRAVEL).toFixed(2);
+	return `translate(${dx}px, ${dy}px)`;
+}
+
 export interface PadButtonState {
 	pressed: boolean;
 	/** 模拟量 0–1（按键为 0/1，扳机为真实模拟值） */
