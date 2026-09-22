@@ -1,18 +1,14 @@
 /**
- * B 站扫码登录。
- *
- * 流程（官方 H5 扫码登录）：
- *   1. GET  /x/passport-login/web/qrcode/generate  → { url, qrcode_key }
+ * B 站扫码登录（官方 H5 流程）：
+ *   1. GET /x/passport-login/web/qrcode/generate → { url, qrcode_key }
  *   2. 把 url 生成二维码，用 B 站 App 扫码
  *   3. 轮询 /x/passport-login/web/qrcode/poll?qrcode_key=…
- *      86101 未扫码 → 86090 已扫码待确认 → 0 成功（HTTP Set-Cookie 里下发凭据）
+ *      86101 未扫码 → 86090 已扫码待确认 → 0 成功（Set-Cookie 下发凭据）
  *
- * 为什么要有这条路：手抄 Cookie 既容易抄错，又容易把 `SESSDATA` 粘到
- * 不该粘的地方。扫码只需一次，且拿到的是完整凭据集合。
+ * 手抄 Cookie 容易抄错、也容易把 SESSDATA 粘到不该粘的地方，扫码只需一次。
  *
- * 状态码与取 Cookie 的方式都经过实测（见 tests/unit.test.ts 的固定报文），
- * 「成功」分支无法在无人值守环境复现，因此本模块把所有解析都做成纯函数，
- * 只把网络调用留在薄薄的外层。
+ * 状态码与取 Cookie 的方式都经过实测（见 tests/unit.test.ts 的固定报文）；
+ * 「成功」分支无法在无人值守环境复现，因此解析都是纯函数，网络调用留在薄外层。
  */
 
 const UA =
@@ -102,15 +98,11 @@ export interface QrPollResult {
 }
 
 /**
- * 从 `Set-Cookie` 头里挑出登录凭据。
+ * 从 Set-Cookie 里挑出登录凭据。
  *
- * B 站在登录成功时下发一整套 Cookie，但 `set-cookie` 的解析在不同运行时
- * 略有差异（Node 的 `getSetCookie()` 返回数组），因此这里既接受数组也接受
- * 单串，并且**按值截断到第一个分号** —— `Set-Cookie` 会带
- * `Path=/`、`Expires=`、`HttpOnly` 等属性，直接拼进 Cookie 头会污染请求。
- *
- * 只保留凭据相关的字段：B 站还顺带下发 `LIVE_BUVID`、`buvid3` 等，
- * 但那些属于设备指纹，由本地 SPI 流程负责，没必要混进来。
+ * 接受数组或单串（Node 的 getSetCookie() 返回数组），且**按值截断到第一个分号** ——
+ * Set-Cookie 会带 Path=/、Expires=、HttpOnly 等属性，直接拼进 Cookie 头会污染请求。
+ * 只保留凭据字段：LIVE_BUVID、buvid3 属于设备指纹，由本地 SPI 负责。
  */
 export function extractLoginCookie(setCookies: readonly string[]): string {
 	/** 登录必需或显著有用的字段 */
@@ -147,12 +139,8 @@ export function extractLoginCookie(setCookies: readonly string[]): string {
 }
 
 /**
- * 轮询一次。
- *
- * Cookie 可能出现在两个位置，实测两种都存在过：
- * 1. HTTP 响应的 `Set-Cookie`（主流）
- * 2. `data.url` 的查询参数里（旧版行为，`url` 会带上同样的凭据）
- * 因此优先用 Set-Cookie，取不到再从 `url` 兜底。
+ * 轮询一次。Cookie 实测可能出现两处：Set-Cookie（主流）或 data.url 的查询参数
+ * （旧版行为）。优先 Set-Cookie，取不到再从 url 兜底。
  */
 export async function pollQrOnce(key: string): Promise<QrPollResult> {
 	const res = await fetch(`${API.poll}?qrcode_key=${encodeURIComponent(key)}`, {
@@ -184,14 +172,10 @@ export async function pollQrOnce(key: string): Promise<QrPollResult> {
 }
 
 /**
- * 从跳转地址的查询串里取凭据。
+ * 从跳转地址的查询串里取凭据，形如 `?DedeUserID=123&SESSDATA=...&bili_jct=...`。
  *
- * 形如 `...?DedeUserID=123&Expires=...&SESSDATA=...&bili_jct=...`。
- *
- * ⚠️ 这里**不能**用 `URLSearchParams`：它会做百分号解码，而 B 站的 SESSDATA
- * 值本身就带 `%2C`（逗号分隔符）之类的转义，是**编码形态**。
- * 解码后再放进 Cookie 头就与服务端存储的形态不一致，凭据会失效。
- * 因此手工按 `&` / `=` 切分并原样保留值。
+ * ⚠️ **不能**用 URLSearchParams：它会做百分号解码，而 SESSDATA 值本身就带 %2C
+ * 之类的转义，是**编码形态**。解码后放进 Cookie 头与服务端存储的形态不一致，凭据会失效。
  */
 export function extractLoginCookieFromUrl(url: string): string {
 	const WANTED = ['SESSDATA', 'bili_jct', 'DedeUserID', 'DedeUserID__ckMd5', 'sid'];
@@ -222,15 +206,11 @@ export function extractLoginCookieFromUrl(url: string): string {
 }
 
 /**
- * 轮询直到出现终态。
+ * 每 intervalMs 轮询一次直到出现终态，最多 timeoutMs；scanned 通过 onStatus 上报。
  *
- * - 每 `intervalMs` 一次，最多 `timeoutMs`
- * - `scanned` 会通过 `onStatus` 回调上报，便于界面更新
- *
- * 超时单独返回 `timeout`，**不能混同为 `expired`**：
- * 超时的原始状态码通常是 86101（未扫码），而 `expired` 对应 86038。
- * 把两者混在一起会打印出「二维码已过期（状态码 86101）」这种自相矛盾的信息，
- * 让人误以为二维码失效了其实是没人扫。
+ * 超时单独返回 `timeout`，**不能混同为 expired**：超时的原始码通常是 86101（未扫码），
+ * 而 expired 对应 86038，混在一起会打印出「二维码已过期（状态码 86101）」
+ * 这种自相矛盾的信息。
  */
 export async function waitForQrLogin(
 	key: string,

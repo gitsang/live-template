@@ -3,9 +3,8 @@
  *
  * - 按天分文件：`<dataDir>/room-<id>/<YYYY-MM-DD>.jsonl`，逐行 append，崩溃安全
  * - 「当天」按**本地时区**判定，容器内必须设 TZ=Asia/Shanghai，否则跨零点会错位
- * - 回显：新客户端连接时读当天文件末尾若干条，因此**重启服务后依然能回显**
- *
- * 写入采用「排队 + 批量 flush」，避免每条弹幕都触发一次 fs 调用。
+ * - 回显：读当天文件末尾若干条，因此重启服务后依然能回显
+ * - 写入排队 + 批量 flush，避免每条弹幕都触发一次 fs 调用
  */
 import { appendFile, mkdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -125,10 +124,8 @@ export class DanmakuStore {
 	}
 
 	/**
-	 * 读取最近 N 条可渲染条目用于回显。
-	 *
-	 * 从文件尾部往前读，避免把当天所有条目都载入内存。
-	 * 含弹幕 / 礼物 / SC（三者都能渲染）；其余忽略。只回显当天。
+	 * 读取最近 N 条可渲染条目用于回显（弹幕 / 礼物 / SC），只回显当天。
+	 * 从文件尾部往前读，避免把当天所有条目载入内存。
 	 */
 	async readEcho(count: number): Promise<DanmakuItem[]> {
 		const file = this.filePath();
@@ -162,11 +159,8 @@ export class DanmakuStore {
 	}
 
 	/**
-	 * 重新启用。
-	 *
-	 * 房间在空闲空闲断开后会被 RoomHub 保留在注册表里，
-	 * 下次有客户端订阅时同一个 Store 实例会被复用，
-	 * 因此 close() 之后必须能重新打开。
+	 * 重新启用。空闲断开后房间仍留在 RoomHub 注册表里，下次订阅会复用同一个
+	 * Store 实例，因此 close() 之后必须能重新打开。
 	 */
 	reopen(): void {
 		this.#closed = false;
@@ -175,11 +169,8 @@ export class DanmakuStore {
 }
 
 /**
- * 读取文件末尾若干行。
- *
- * 实现策略：先用 createReadStream 全量流式读取并只保留尾部 N 行。
- * 单日文件通常只有几 MB，流式读取的峰值内存取决于单行长度而非文件大小，
- * 比 readFile 全量载入安全得多。
+ * 读取文件末尾若干行。用 createReadStream 流式读取并只保留尾部 N 行：
+ * 峰值内存取决于单行长度而非文件大小，比 readFile 全量载入安全得多。
  */
 async function tailLines(file: string, n: number): Promise<string[]> {
 	const stream = createReadStream(file, { encoding: 'utf8' });

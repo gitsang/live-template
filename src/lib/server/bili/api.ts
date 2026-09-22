@@ -1,10 +1,8 @@
 /**
  * B 站 API 访问层。
  *
- * 关键点（对齐 scripts/danmaku.py 的参考实现）：
- * - 必须带 buvid 设备指纹 + WBI 签名（w_rid/wts）+ dm_img_* 风控参数，
- *   否则 getDanmuInfo 返回 -352。
- * - 不需要登录账号，匿名即可。
+ * 必须带 buvid 指纹 + WBI 签名（w_rid/wts）+ dm_img_* 风控参数，否则 getDanmuInfo 返回 -352。
+ * 不需要登录账号，匿名即可。
  */
 
 const UA =
@@ -130,11 +128,7 @@ export function wbiMixinKey(imgKey: string, subKey: string): string {
 
 import { createHash } from 'node:crypto';
 
-/**
- * WBI 签名：返回带 w_rid / wts 的完整查询串
- *
- * 注意：必须先把 wts 并进参数集再排序拼串，否则签名不匹配。
- */
+/** WBI 签名：返回带 w_rid / wts 的完整查询串。必须先把 wts 并进参数集再排序拼串 */
 export function wbiSign(
 	params: Record<string, string | number>,
 	mixinKey: string,
@@ -168,12 +162,9 @@ export interface NavInfo {
 /**
  * 用 nav 接口校验 Cookie 是否为**有效登录态**。
  *
- * 为什么必须先校验：弹幕服务器的认证包只靠 uid 声称身份。实测在
- * **不带 Cookie 的情况下填一个真实 uid**（如官方账号 2），服务端会直接以
- * 1006 关闭连接且不回认证回应 —— 即「声称登录」必须有凭据支撑，
- * 否则连匿名连接都不如。因此只有在 nav 确认 isLogin 后才敢用真实 uid。
- *
- * 匿名请求返回 `code = -101`、`isLogin = false`，不抛错。
+ * 必须先校验：认证包只靠 uid 声称身份，实测**不带 Cookie** 却填真实 uid（如账号 2）
+ * 会被服务端以 1006 直接断开且不回认证回应 —— 声称登录必须有凭据支撑，
+ * 否则连匿名都不如。匿名请求返回 code=-101、isLogin=false，不抛错。
  */
 export async function getNavInfo(cookie: string): Promise<NavInfo> {
 	const res = await apiGet<{
@@ -206,9 +197,7 @@ async function getWbiKeys(cookie: string): Promise<{ imgKey: string; subKey: str
 
 /**
  * 取弹幕服务器 token 与地址列表。
- *
- * `cookie` 可以是匿名指纹，也可以是带登录态的完整 Cookie ——
- * 后者能让 nav / getDanmuInfo 以登录身份请求（更容易通过风控）。
+ * cookie 可以是匿名指纹，也可以是带登录态的完整 Cookie（后者更容易通过风控）。
  */
 export async function getDanmuInfo(roomId: number, cookie: string): Promise<DanmuInfo> {
 	const { imgKey, subKey } = await getWbiKeys(cookie);
@@ -253,4 +242,4 @@ export async function getDanmuInfo(roomId: number, cookie: string): Promise<Danm
 	return { token: res.data.token, hosts };
 }
 
-/* ---------------- 内部：MD5 由 node:crypto 提供，见上方 import ---------------- */
+

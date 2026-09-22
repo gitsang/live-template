@@ -1,11 +1,8 @@
 /**
- * /ws 端点：把弹幕推给页面。
+ * /ws 端点：把弹幕推给页面。协议见 docs/design.md §9。
  *
- * 协议见 docs/design.md §9：
- * - 连接时带 ?room=&since=
- * - 建立后先发 hello（含最新状态 + 当天最近 N 条回显）
- * - 之后推 status / danmaku / ping
- * - 客户端回 pong 保活
+ * 连接时带 ?room=&since=；建立后先发 hello（最新状态 + 当天最近 N 条回显），
+ * 之后推 status / danmaku / ping，客户端回 pong 保活。
  */
 import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -156,7 +153,7 @@ export class DanmakuWsServer {
 		});
 		ws.on('error', () => this.#cleanup(client));
 
-		/* 保活：ping 后等不到 pong 就断开，防止半开连接泄漏 */
+		/* ping 后等不到 pong 就断开，防止半开连接泄漏 */
 		let lastPong = Date.now();
 		ws.on('pong', () => {
 			lastPong = Date.now();
@@ -181,15 +178,14 @@ export class DanmakuWsServer {
 
 		/*
 		 * 回显与补发互斥：
-		 * - since == 0：全新页面，没有本地状态 → 给一盘磁盘回显（重启后依然有效）
-		 * - since > 0：客户端重连，只要断线期间错过的 → 绝不能同时给回显，
-		 *   否则 echo 与 replay 的区间重叠，同一条弹幕会被渲染两次
+		 * - since == 0：全新页面没有本地状态 → 给磁盘回显
+		 * - since > 0：重连只要错过的 → 绝不能同时回显，否则区间重叠、同一条渲染两次
 		 */
 		const freshPage = since <= 0;
 
 		/*
 		 * 先订阅再读回显，否则「读磁盘」与「开始接收」之间到达的弹幕会丢。
-		 * 这个窗口里到达的事件先缓冲，回显/补发完成后按 id 水位线放行。
+		 * 窗口内到达的事件先缓冲，回显/补发完成后按 id 水位线放行。
 		 */
 		const pending: DanmakuItem[] = [];
 		let ready = false;
@@ -229,8 +225,7 @@ export class DanmakuWsServer {
 		});
 
 		/*
-		 * 排空缓冲并在同一个同步块里转为直推。
-		 * JS 单线程，循环期间不会有新事件插入，因此不会漏也不会重。
+		 * 排空缓冲并在同一个同步块里转为直推。JS 单线程，循环期间不会有新事件插入。
 		 */
 		client.unsubBus = session.bus.subscribe((event) => {
 			if (!ready) {

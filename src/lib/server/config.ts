@@ -35,28 +35,18 @@ export interface Config {
 	/** 日志级别 */
 	logLevel: 'debug' | 'info' | 'warn' | 'error';
 	/**
-	 * B 站登录态 Cookie。
-	 *
-	 * 留空即匿名连接，此时 B 站返回 `uid = 0` 且昵称被打码（`赛***`）。
-	 * 带上后弹幕服务器会还原真实昵称。
-	 *
-	 * ⚠️ 这是凭据，等效于账号登录态，**绝不要提交进仓库**。
-	 * 生产建议用 `BILI_COOKIE_FILE` 指向一个不进版本库的文件。
+	 * B 站登录态 Cookie。留空即匿名（uid=0，昵称被打码）。
+	 * ⚠️ 等效于账号登录态，**绝不要提交进仓库**；建议用 BILI_COOKIE_FILE 指向不进库的文件。
 	 */
 	biliCookie: string;
 	/**
-	 * 网页端扫码登录的访问口令。
+	 * 网页端扫码登录的访问口令。留空表示关闭网页登录（默认），此时仍可用 `npm run login`。
 	 *
-	 * 为什么需要：**二维码图就是 `qrcode_key` 的图形编码**，而持有 key 的人
-	 * 就能在扫码成功后领走凭据（B 站轮询接口不校验任何身份 —— 已实测：
-	 * 不带 cookie 也能轮询；把下发的 SVG 解码回来即可还原 key 并独立轮询）。
-	 * 也就是说图是**凭据等价物**，而 compose 默认把端口发布到 0.0.0.0，
-	 * 不设口令时同网段的人能取走操作者正在扫的那张图。
+	 * 为什么需要：**二维码图就是 qrcode_key 的图形编码**，持有 key 的人就能在扫码成功后
+	 * 领走凭据（实测：B 站轮询接口不校验身份，把下发的 SVG 解码回来即可还原 key 并独立轮询）。
+	 * 即图是凭据等价物，而 compose 默认发布到 0.0.0.0，不设口令时同网段的人能取走正在扫的图。
 	 *
-	 * 注意：口令**防不住**二维码钓鱼 —— B 站生成接口是公开的，谁都能自己造码。
-	 * （早期注释把它写成防钓鱼的理由是错的，已更正。）
-	 *
-	 * 留空表示**关闭网页登录**（默认）。此时仍可用 `npm run login` 扫码。
+	 * 口令**防不住**二维码钓鱼 —— B 站生成接口是公开的，谁都能自己造码。
 	 */
 	loginToken: string;
 }
@@ -168,11 +158,9 @@ export function toViewOptions(c: Config): ViewOptions {
 /**
  * 取登录态 Cookie，优先级：BILI_COOKIE 环境变量 > BILI_COOKIE_FILE 文件 > config.json。
  *
- * 为什么要支持「从文件读」：环境变量会被 `docker inspect`、
- * 进程列表（/proc/<pid>/environ）和日志采集系统看到，而 SESSDATA
- * 一旦泄漏就等于账号被别人登录。文件可以单独 chmod 600 并排除在版本库外。
- *
- * 读取失败不抛错 —— 缺个可选凭据不该让服务起不来，降级为匿名并记一条告警。
+ * 支持从文件读是因为环境变量会被 docker inspect、/proc/<pid>/environ 与日志采集看到，
+ * 而 SESSDATA 泄漏等于账号被别人登录；文件可以 chmod 600 并排除在版本库外。
+ * 读取失败不抛错 —— 缺个可选凭据不该让服务起不来，降级为匿名并记告警。
  */
 function resolveBiliCookie(env: NodeJS.ProcessEnv, file: FileConfig): string {
 	const inline = str(env.BILI_COOKIE, '');
@@ -182,10 +170,6 @@ function resolveBiliCookie(env: NodeJS.ProcessEnv, file: FileConfig): string {
 	if (path) {
 		const abs = resolve(path);
 
-		/*
-		 * 注意：容器里 ./secrets 是**只读**挂载，扫码 CLI 必须在宿主机上跑
-		 * （见 README「登录态」）。这里只负责读。
-		 */
 		const raw = readCookieFile(abs);
 		if (raw) {
 			/* 权限过宽只告警不阻断：可能是有意为之（如共享部署） */

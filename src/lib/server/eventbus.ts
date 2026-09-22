@@ -1,12 +1,6 @@
 /**
- * 事件总线。
- *
- * 职责：
- * - 给每条事件分配全局自增 id（用于客户端断线补发）
- * - 环形历史（保留最近 N 条，供补发）
- * - 单独保存最新的 status，新连接立刻能拿到正确状态
- *
- * 每个房间一个实例，由 RoomHub 创建。
+ * 事件总线：给每条事件分配自增 id（供断线补发）、维护环形历史、保存最新 status
+ * 使新连接立刻拿到正确状态。每个房间一个实例，由 RoomHub 创建。
  */
 import type { DanmakuInput, DanmakuItem, StatusEvent } from '$lib/shared/types';
 

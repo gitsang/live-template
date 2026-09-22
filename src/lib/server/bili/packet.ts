@@ -48,9 +48,7 @@ export interface Packet {
 }
 
 /**
- * 拆包并解压。
- *
- * protover=3 的包体内可能是被 brotli 压缩的「一批包」，需要递归拆解；
+ * 拆包并解压。protover=3 的包体内可能是 brotli 压缩的一批包，需要递归拆解；
  * 同时兼容 ver=2（zlib）以应对服务端降级。
  */
 export function decode(data: Buffer): Packet[] {
@@ -85,8 +83,6 @@ export function decode(data: Buffer): Packet[] {
 
 	return out;
 }
-
-/* ---------------- 消息体解析 ---------------- */
 
 /** 认证回应 */
 export interface AuthReply {
@@ -151,12 +147,11 @@ export function parseDanmakuInfo(info: unknown): RawDanmakuInfo | null {
 }
 
 /**
- * 从 `info[0][15].extra` 取 user_hash。
+ * 从 info[0][15].extra 取 user_hash。
  *
- * 结构是 `{ extra: "<JSON 字符串>" }` —— 注意 extra 本身是被序列化过的字符串，
- * 需要二次 JSON.parse。B 站隐藏 uid 之后，这是唯一稳定的用户标识
- * （实测 uid 恒为 0、昵称被打码，只有它能把不同观众区分开）。
- * 解析失败一律返回空串，绝不因为一个可选字段丢掉整条弹幕。
+ * extra 本身是被序列化过的字符串，需要二次 JSON.parse。B 站隐藏 uid 之后它是唯一
+ * 稳定的用户标识（实测 uid 恒为 0、昵称被打码，只有它能区分不同观众）。
+ * 解析失败返回空串，绝不因为一个可选字段丢掉整条弹幕。
  */
 export function parseUserHash(raw: unknown): string {
 	try {
