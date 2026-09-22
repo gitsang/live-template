@@ -175,7 +175,7 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
 | 场景 | 做法 |
 | --- | --- |
 | 本机/SSH 有 Node | `npm run login` |
-| 只有 Docker | `docker compose run --rm login` |
+| 只有 Docker | `docker compose run --rm --no-deps live-template …`（见下） |
 | 想用浏览器 | 配 `LOGIN_TOKEN` → 打开 **`/admin`** → 输入口令 → 扫码 |
 
 #### 终端扫码
@@ -196,8 +196,13 @@ npm run login
 **容器部署**（宿主机没有 Node 也能用，镜像里已打包好）：
 
 ```bash
-docker compose run --rm login
+docker compose run --rm --no-deps live-template \
+  node build/danmaku/login.js --out /run/secrets/bili-cookie.txt
 ```
+
+> 注意输出路径用 `/run/secrets/bili-cookie.txt`（**容器内**路径），
+> 与服务读取的是同一个文件；写到别处会变成「扫码成功但仍匿名」。
+> 服务已运行时加 `--no-deps`，避免把它一起重启。
 
 #### 浏览器扫码（管理页）
 

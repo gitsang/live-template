@@ -49,24 +49,15 @@ services:
     # 若 OBS 在宿主机、服务在容器内，用 host 网络可避免额外的端口映射问题
     # network_mode: host
 
-  # 一次性扫码登录（用完即弃）。
-  #
-  #   docker compose run --rm login
-  #
-  # 存在的意义：纯 Docker 部署时宿主机可能根本没装 Node，
-  # 无法执行 `npm run login`。这里直接复用镜像里已打包的 login.js，
-  # 因此只要 Docker 能跑就能扫码。
-  #
-  # ./secrets 在这里也是可写的，以便与宿主机的 `npm run login` 共用同一份凭据。
-  login:
-    profiles: ['tools']
-    build:
-      context: .
-      dockerfile: Containerfile
-    image: live-template:latest
-    environment:
-      TZ: Asia/Shanghai
-    volumes:
-      - ./secrets:/secrets
-    # -it 由 `docker compose run` 提供；二维码是靠终端字符画的，必须有 TTY
-    command: node build/danmaku/login.js --out /secrets/bili-cookie.txt
+# 用 Docker 终端扫码（不用网页管理页、也不用装 Node）：
+#
+#   docker compose run --rm --no-deps live-template \
+#     node build/danmaku/login.js --out /run/secrets/bili-cookie.txt
+#
+# 为什么不另开一个 login 服务：那需要把 ./secrets 再挂到**另一个容器路径**
+# （/secrets），于是同一个目录出现两个路径；写进 /secrets 的东西服务端读的是
+# /run/secrets，两边一旦不一致就会变成「扫码成功但仍然匿名」这类难查的问题。
+# 复用主服务的定义，路径就只有一份。
+#
+# 需要 TTY（二维码是终端字符画），且服务已运行时用 --no-deps 避免重启它。
+

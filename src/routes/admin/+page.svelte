@@ -74,8 +74,8 @@
 				网页登录未开启。设置环境变量 <code>LOGIN_TOKEN</code> 后重启服务即可启用本页。
 			</p>
 			<p class="hint">
-				不启用也没关系：可以在终端执行 <code>npm run login</code>（或
-				<code>docker compose run --rm login</code>）扫码登录 B 站。
+				不启用也没关系：可以在终端执行 <code>npm run login</code> 扫码登录 B 站
+				（Docker 部署见 compose.yml 末尾的说明）。
 			</p>
 		</div>
 	{:else if !authorized}

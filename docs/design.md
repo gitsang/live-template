@@ -723,7 +723,7 @@ nav 接口校验 isLogin 且 mid == 解析出的 uid   ← 缺这步会被服务
 
 #### 交互式登录（扫码）
 
-`npm run login` / `docker compose run --rm login`，用 B 站 App 扫码即可，
+`npm run login`（或用 Docker：见 compose.yml 尾部的注释），用 B 站 App 扫码即可，
 不必手抄 Cookie。手抄有两个现实问题：容易漏字段（缺 `DedeUserID` 就无法解析
 uid，认证包里表达不出登录身份），以及容易在粘贴过程中把 `SESSDATA`
 留在聊天记录或工单里。
