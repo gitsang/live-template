@@ -19,7 +19,7 @@
 	onMount(() => {
 		layout();
 		window.addEventListener('resize', layout);
-		/* 字体加载完可能改变布局，再算一次 */
+		/* 字体加载完可能改变布局，需重算 */
 		document.fonts?.ready.then(layout);
 		return () => window.removeEventListener('resize', layout);
 	});

@@ -1,11 +1,8 @@
 /**
- * 演示事件生成器 —— 服务端 mock 与前端 mock 共用同一份逻辑。
+ * 演示事件生成器 —— 服务端 mock 与前端 mock 共用。
  *
- * 为什么放在 shared：一开始服务端和前端各写了一份 mock，结果前端那份只造弹幕，
- * 于是 `MOCK=1` 时礼物与 SC 永远不出现（页面走前端 mock，根本不连 WS）。
- * 两份实现必然发散，所以合并成这一处。
- *
- * 不依赖任何 Node/浏览器 API，前后端都能 import。
+ * 曾经两边各写一份，结果前端那份只造弹幕，MOCK=1 时礼物与 SC 永远不出现
+ * （页面走前端 mock，根本不连 WS）。不依赖任何 Node/浏览器 API。
  */
 import { DEMO_GIFTS, DEMO_LONG_TEXT, DEMO_TEXT, DEMO_USERS } from './demo';
 import type { DanmakuInput } from './types';

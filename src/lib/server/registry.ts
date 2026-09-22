@@ -1,11 +1,9 @@
 /**
- * 运行时注册表：让 SvelteKit 路由能访问到由 server.mjs 创建的 RoomHub。
+ * 运行时注册表：让 SvelteKit 路由能访问到 server.mjs 创建的 RoomHub。
  *
- * 为什么用 globalThis 而不是模块级变量：
- * 生产环境下 build/handler.js（SvelteKit 产物）与 build/danmaku/entry.js
- * （服务端入口产物）是两次独立打包，各有自己的模块实例。模块级单例在
- * 两边互不可见，但两者运行在同一个 Node 进程里，所以挂在 globalThis 上
- * 是唯一可靠的桥接方式。dev 环境下同样适用。
+ * 用 globalThis 而非模块级变量：生产环境下 build/handler.js 与
+ * build/danmaku/entry.js 是两次独立打包，各有自己的模块实例，模块级单例互不可见；
+ * 两者在同一 Node 进程里，挂 globalThis 是唯一可靠的桥接方式。
  */
 
 const HUB_KEY = Symbol.for('live-template.hub');

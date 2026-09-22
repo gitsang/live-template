@@ -5,7 +5,7 @@
 
 	let { children, data } = $props();
 
-	/** 服务端配置下发的默认值（config.json / 环境变量） */
+	/** 服务端下发的默认值（config.json / 环境变量） */
 	const base = $derived(data.view as Partial<ViewOptions>);
 
 	/** URL 参数覆盖服务端配置 */

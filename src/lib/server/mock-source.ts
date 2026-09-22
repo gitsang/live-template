@@ -1,9 +1,6 @@
 /**
- * Mock 弹幕源：不连 B 站，本地造弹幕/礼物/SC。
- *
- * 走与真实采集完全相同的 EventBus/Store 通道，因此整条链路
- * （Hub → 总线 → 落盘 → WS → 渲染）都能在离线环境验证。
- * 事件生成复用 $lib/shared/demo-events，与前端 mock 是同一份逻辑。
+ * Mock 弹幕源：不连 B 站，本地造弹幕/礼物/SC。走与真实采集完全相同的 EventBus/Store
+ * 通道，因此 Hub → 总线 → 落盘 → WS → 渲染 整条链路都能离线验证。
  */
 import { createDemoEvent } from '$lib/shared/demo-events';
 import type { DanmakuInput } from '$lib/shared/types';

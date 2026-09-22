@@ -1,6 +1,4 @@
-/**
- * 极简日志。级别可通过 LOG_LEVEL 控制，输出到 stdout/stderr。
- */
+/** 极简日志，级别由 LOG_LEVEL 控制，输出到 stdout/stderr。 */
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
