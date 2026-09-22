@@ -1,10 +1,6 @@
 /**
- * 轻量断言式测试（无需测试框架）。
- *
- * 只覆盖不需要网络的纯逻辑：协议编解码、WBI 签名、JSONL 落盘与回显。
- * 真实链路的验证见 docs/design.md 的验收标准，靠实际跑服务完成。
- *
- * 运行：npm test
+ * 轻量断言式测试（无需测试框架），只覆盖不需要网络的纯逻辑：
+ * 协议编解码、WBI 签名、JSONL 落盘与回显。真实链路见 docs/design.md 的验收标准。
  */
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, writeFile, appendFile } from 'node:fs/promises';
@@ -338,9 +334,8 @@ test('聊天框可见行数约 18 行（实测单行 33px）', () => {
 /* ==================== B 站报文解析（礼物 / SC） ==================== */
 
 /*
- * SC 与礼物在真实直播间里很稀有（SC 尤其），
- * 靠连线上碰运气验证不现实，因此这里用**与 B 站实际下发结构一致**的报文做固定夹具。
- * 下面 DANMU_MSG 的 info 数组是从真实直播间抓下来的原样数据。
+ * SC 与礼物在真实直播间很稀有，靠连线上碰运气验证不现实，因此用与 B 站实际下发
+ * 结构一致的固定夹具；下面 DANMU_MSG 的 info 数组抓自真实直播间。
  */
 
 test('真实 DANMU_MSG 的 info 索引与本项目映射一致', () => {
@@ -570,10 +565,7 @@ test('userIdFromCookie 解析 DedeUserID', () => {
 });
 
 test('userIdFromCookie 在只有 ckMd5 时返回 0（不猜测 uid）', () => {
-	/*
-	 * DedeUserID__ckMd5 是 uid 的校验值，不是可逆编码；
-	 * 与其猜一个错误 uid 送进认证包，不如老实按匿名处理。
-	 */
+	/* ckMd5 是校验值不是可逆编码：与其猜个错 uid 送进认证包，不如按匿名处理 */
 	assert.equal(userIdFromCookie('DedeUserID__ckMd5=17c1899abcdef01'), 0);
 });
 

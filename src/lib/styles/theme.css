@@ -409,11 +409,9 @@ html.guide-on .slot {
 	display: flex;
 	flex-direction: column;
 	/*
-	 * 注意：这里不能用 justify-content: flex-end 来实现「内容不足时贴底」。
-	 * 在可滚动容器上，flex-end 会让溢出发生在顶部，且滚不到 —— 最早的几条
-	 * 弹幕会被永久裁掉（scrollHeight 等于 clientHeight，maxScrollTop 为 0）。
-	 * 正确做法是让第一行吃掉剩余空间：内容少时整体贴底，内容多时 margin 归零、
-	 * 正常向下溢出，滚动条能一直拉到最旧一条。
+	 * 不能用 justify-content: flex-end 贴底：在可滚动容器上它会让溢出发生在顶部且
+	 * 滚不到，最早的弹幕被永久裁掉（scrollHeight == clientHeight，maxScrollTop 为 0）。
+	 * 改为让第一行吃掉剩余空间（见下），内容多时 margin 归零、正常向下溢出。
 	 */
 	overflow-y: auto;
 	overflow-x: hidden;
@@ -421,10 +419,8 @@ html.guide-on .slot {
 	scrollbar-width: thin;
 	scrollbar-color: rgba(94, 240, 138, 0.4) transparent;
 	/*
-	 * 想要「屏幕网格」质感的话别用背景 repeating-gradient：
-	 * 行高实测 33px（25.6 行高 + 6 padding + 1 分隔线），
-	 * 固定周期的网格会和真实行错位、越往下越歪。
-	 * 分隔交给 .chat-row 的 border-bottom 就够。
+	 * 别用背景 repeating-gradient 做「屏幕网格」：行高实测 33px（25.6 + 6 padding + 1
+	 * 分隔线），固定周期网格会与真实行错位、越往下越歪。分隔交给 .chat-row 的 border 即可。
 	 */
 }
 
