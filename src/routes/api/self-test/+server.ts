@@ -1,10 +1,6 @@
 /**
- * 链路自检 /api/self-test
- *
- * 往指定房间的事件总线注入几条假弹幕，用来确认「WS → 渲染」这一段是通的：
- * 打开页面后访问这个地址，聊天框应立即出现这几条。
- *
- * 注入的事件也会正常落盘（与真实弹幕同一条路径），因此同时验证了 Store。
+ * 链路自检 /api/self-test：往指定房间的事件总线注入几条假弹幕，确认「WS → 渲染」是通的。
+ * 注入的事件也正常落盘（与真实弹幕同一条路径），因此同时验证了 Store。
  */
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';

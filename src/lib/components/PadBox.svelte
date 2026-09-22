@@ -4,8 +4,7 @@
 	 *
 	 * 读取：rAF 持续轮询 navigator.getGamepads()，不依赖 gamepadconnected 事件
 	 *       （Chromium 只在收到一次按键后才把设备暴露给页面）。
-	 * 渲染：全量键位，严格「只显示当前按下」，松开即熄灭，无历史序列。
-	 *       ABXY / 十字键 / 肩键 / 扳机模拟量 / 双摇杆偏移 / 中键 / Guide。
+	 * 渲染：全量键位，只显示当前按下，松开即熄灭，无历史序列。
 	 * 状态：无手柄或全部松开时整框 opacity 0.55；无设备时显示呼吸提示。
 	 */
 	import Panel from './Panel.svelte';

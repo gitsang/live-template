@@ -1,8 +1,6 @@
 /**
- * 手柄 mock：无手柄的开发环境（例如 Linux 服务器上）也能验证手柄框渲染。
- *
- * 按固定脚本循环播放一段假输入，走与真实手柄完全相同的 PadState 通道，
- * 因此组件代码零分支。
+ * 手柄 mock：无手柄的开发环境也能验证手柄框渲染。按固定脚本循环播放假输入，
+ * 走与真实手柄完全相同的 PadState 通道，因此组件代码零分支。
  */
 import {
 	AXES,
@@ -108,7 +106,7 @@ export class PadMockReader implements PadReader {
 		const tick = (): void => {
 			const t = (performance.now() - t0) % TOTAL;
 			const next = stateAt(t);
-			/* 脚本按帧变化，直接比较轴值即可；这里复用 JSON 比较足够廉价 */
+			/* 脚本按帧变化，直接比较轴值即可，JSON 比较足够廉价 */
 			if (JSON.stringify(next) !== JSON.stringify(last)) {
 				last = next;
 				onChange(next);
@@ -124,5 +122,5 @@ export class PadMockReader implements PadReader {
 /** 调试用：当前脚本长度 */
 export const MOCK_TOTAL_MS = TOTAL;
 
-/* AXES 在脚本里通过位置隐式使用，这里显式引用避免未使用告警 */
+/* AXES 在脚本里通过位置隐式使用，显式引用避免未使用告警 */
 void AXES;

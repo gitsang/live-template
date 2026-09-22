@@ -2,11 +2,9 @@
 	/**
 	 * 单条聊天记录的内容（不含外壳）。
 	 *
-	 * 外壳由 ChatBox 的 `.chat-row` 提供 —— 左侧色条是它的 ::before，
-	 * 而 CSS 自定义属性只向下继承，所以强调色必须由外层设置。
-	 *
-	 * 三类条目（弹幕/礼物/SC）都带 uid / u / lv / guard / medal，
-	 * 因此徽章部分可以共用。
+	 * 外壳由 ChatBox 的 .chat-row 提供，左侧色条是它的 ::before ——
+	 * CSS 自定义属性只向下继承，所以强调色必须由外层设置。
+	 * 弹幕/礼物/SC 都带 uid / u / lv / guard / medal，徽章部分共用。
 	 */
 	import Sprite from './Sprite.svelte';
 	import { formatPrice, guardColor, guardName, nameColor, pickAccent } from '$lib/shared/chat';
@@ -18,7 +16,7 @@
 
 	let { item }: Props = $props();
 
-	/* 种子优先用 user_hash：真实环境 uid 恒为 0、昵称为打码串 */
+	/* 种子优先 user_hash：真实环境 uid 恒为 0、昵称可能是打码串 */
 	const color = $derived(nameColor(item.uh || item.uid, item.u));
 	const guard = $derived(guardName(item.guard));
 	const guardTint = $derived(guardColor(item.guard));

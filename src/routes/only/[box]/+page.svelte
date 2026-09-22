@@ -1,10 +1,7 @@
 <script lang="ts">
 	/**
-	 * 独立单框页：/only/<box>
-	 *
-	 * 渲染成恰好该框的精确像素尺寸并填满视口，无画布缩放、无 HUD。
-	 * 在 OBS 里直接把浏览器源的宽高填成对应数值即可零误差对齐：
-	 *   video 1360×765 / notice 1360×169 / chat 474×630 / pad 474×304
+	 * 独立单框页：/only/<box>，渲染成恰好该框的精确像素尺寸并填满视口（无缩放、无 HUD）。
+	 * OBS 里把浏览器源的宽高填成上面 geometry 给出的外框数值即可零误差对齐。
 	 */
 	import { page } from '$app/state';
 	import ChatBox from '$lib/components/ChatBox.svelte';
@@ -33,7 +30,7 @@
 		return () => created.stop();
 	});
 
-	/* 单个面板的外框尺寸，即 OBS 里该填的数值 */
+	/* 面板外框尺寸，即 OBS 里该填的数值 */
 	const dimText = $derived(
 		valid ? `${Math.round(PANELS[box].w)}×${Math.round(PANELS[box].h)}` : ''
 	);

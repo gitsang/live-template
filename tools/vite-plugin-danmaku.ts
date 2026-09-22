@@ -1,13 +1,8 @@
 /**
- * Vite dev 插件：把 /ws 挂到 dev server 上。
+ * Vite dev 插件：把 /ws 挂到 dev server 上，复用与生产（server.mjs）同一套 DanmakuWsServer。
  *
- * 生产环境由 server.mjs 挂载（见 src/lib/server/ws-server.ts）；
- * dev 环境没有 http.Server 的直接控制权，只能通过 configureServer 拿到底层
- * server 实例，因此这里复用同一套 DanmakuWsServer。
- *
- * 注意：应用代码必须用 server.ssrLoadModule 动态加载。
- * vite.config.ts 在 Vite 的模块图之外被加载，那里解析不了 `$lib` 别名，
- * 顶层 import 应用模块会直接报 ERR_MODULE_NOT_FOUND。
+ * 应用代码必须用 server.ssrLoadModule 动态加载：vite.config.ts 在 Vite 的模块图之外
+ * 被加载，那里解析不了 `$lib` 别名，顶层 import 应用模块会报 ERR_MODULE_NOT_FOUND。
  */
 import type { Plugin, ViteDevServer } from 'vite';
 import type { Server } from 'node:http';

@@ -1,9 +1,6 @@
 /**
- * 健康检查 /api/health
- *
- * 返回房间会话、连接状态与进程运行时长，用于排查「弹幕没上来」。
- * hub 通过 globalThis 注册表取得（见 $lib/server/registry.ts），
- * 因此生产环境下 server.mjs 创建的实例在这里同样可见。
+ * 健康检查 /api/health：房间会话、连接状态与运行时长，用于排查「弹幕没上来」。
+ * hub 通过 globalThis 注册表取得（见 registry.ts），故 server.mjs 创建的实例在这里也可见。
  */
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';

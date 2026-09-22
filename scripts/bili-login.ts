@@ -2,17 +2,13 @@
 /**
  * 扫码登录 B 站，把凭据写进本地文件。
  *
- * 用法：
  *   npm run login                    # 写到默认路径 ./secrets/bili-cookie.txt
  *   npm run login -- --out /tmp/ck   # 指定输出路径
  *   npm run login -- --print         # 顺带把 Cookie 打到标准输出（谨慎）
  *
- * 为什么做成扫码而不是让人手抄 Cookie：
- *   手抄既容易抄漏字段（少了 DedeUserID 就无法解析 uid），
- *   又容易在粘贴过程中把 SESSDATA 泄漏到聊天记录或工单里。
- *
- * 登录成功后会立刻用 nav 校验一次，并打印账号昵称 ——
- * 这样「是否真的登录上了」是当场可见的，而不是等连上弹幕才发现昵称还在打码。
+ * 做成扫码而非手抄：手抄既容易抄漏字段（少了 DedeUserID 就无法解析 uid），
+ * 又容易在粘贴时把 SESSDATA 泄漏到聊天记录或工单里。
+ * 成功后立刻用 nav 校验并打印昵称，使「是否真的登录上了」当场可见。
  */
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';

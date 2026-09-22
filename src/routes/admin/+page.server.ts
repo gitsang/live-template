@@ -1,8 +1,6 @@
 /**
- * 管理页服务端数据。
- *
- * 关键点：**未授权时不返回任何数据**（连「有没有登录 B 站」都不告诉）。
- * 只在会话有效时下发状态，页面本身再根据 `authorized` 决定渲染登录表单还是面板。
+ * 管理页服务端数据。**未授权时不返回任何数据**（连「有没有登录 B 站」都不告诉）：
+ * 只在会话有效时下发状态，页面再根据 authorized 决定渲染登录表单还是面板。
  */
 import { ADMIN_COOKIE } from '$lib/server/admin-session';
 import { checkAdminSession, loginEnabled } from '$lib/server/login-service';
@@ -26,11 +24,7 @@ export const load: PageServerLoad = ({ cookies }) => {
 		authorized,
 		/** 未授权时的原因，供页面展示 */
 		reason: error ?? '',
-		/*
-		 * B 站登录态只在已授权时下发。
-		 * 未授权时不下发任何运行状态 —— 那属于「不需要登录就能读到的信息」，
-		 * 而管理页的整个意义就是把这类信息收进来。
-		 */
+		/* B 站登录态只在已授权时下发；未授权时不泄露任何运行状态 */
 		bili: authorized ? readBili() : null
 	};
 };

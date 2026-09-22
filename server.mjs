@@ -1,9 +1,6 @@
 /**
- * 生产入口。
- *
- * 1. 用 SvelteKit 的 adapter-node handler 处理 HTTP
- * 2. 在同一个 http.Server 上挂载 /ws（弹幕推送）
- * 3. 优雅退出时落盘并关闭连接
+ * 生产入口：adapter-node handler 处理 HTTP，在同一个 http.Server 上挂载 /ws，
+ * 退出时落盘并关闭连接。
  */
 import { createServer } from 'node:http';
 import { handler } from './build/handler.js';
@@ -37,17 +34,15 @@ server.listen(config.port, config.host, () => {
 	console.log(`[live-template] http://${config.host}:${config.port}`);
 	console.log(`[live-template] 房间=${config.room} 模式=${mode} 数据目录=${config.dataDir}`);
 	/*
-	 * 只说明「有没有配登录态」，绝不打印 Cookie 本身。
-	 * 注意这里不能断言「已登录」—— 此刻还没校验；凭据无效时会降级为匿名，
-	 * 真实结果由首次连接时的 nav 校验决定并另行告警。
+	 * 只说明「有没有配登录态」，绝不打印 Cookie 本身。这里不能断言「已登录」——
+	 * 此刻还没校验，凭据无效时会降级为匿名，真实结果由首次连接的 nav 校验决定。
 	 */
 	console.log(
 		`[live-template] 身份=${config.biliCookie ? '已配置登录态（连接时校验）' : '匿名（部分昵称会被打码）'}`
 	);
 	/*
-	 * 网页登录入口：把口令打印在启动日志里（仅此处出现一次）。
-	 * 这是有意为之 —— 口令要人工从终端抄进网页，而日志是运维看得到的地方。
-	 * 因此**不要**把它写进任何会被采集/上报的日志级别里（这里是 stdout 一次）。
+	 * 把口令打印在启动日志里（仅此处一次）：口令要人工从终端抄进网页，而日志是运维
+	 * 看得到的地方。因此**不要**把它写进任何会被采集/上报的日志级别。
 	 */
 	if (config.loginToken) {
 		console.log(`[live-template] 管理页已开启: /admin （访问口令: ${config.loginToken}）`);

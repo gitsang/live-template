@@ -1,15 +1,10 @@
 /**
- * 服务端侧的独立构建配置。
+ * 服务端侧的独立构建配置。产物都输出到 build/danmaku/：
+ * - entry.js 供 server.mjs import（HTTP + /ws 挂载）
+ * - login.js 扫码登录 CLI
  *
- * 产物（都输出到 build/danmaku/）：
- * - entry.js  供 server.mjs import（HTTP + /ws 挂载）
- * - login.js  扫码登录 CLI
- *
- * 为什么 CLI 也要打包：生产镜像执行了 `npm prune --omit=dev`，
- * 而运行 TS 需要 tsx（devDependency）。不打包的话
- * `docker exec ... npm run login` 在容器里必然失败 —— 恰恰是
- * 容器部署时最需要扫码登录的场景。打成纯 JS 后只需 node 即可运行。
- *
+ * CLI 也要打包：生产镜像执行了 `npm prune --omit=dev`，而运行 TS 需要 tsx（devDependency），
+ * 不打包则容器里必然失败 —— 恰恰是容器部署时最需要扫码登录的场景。
  * ws 与 qrcode-terminal 一并打包，容器里无需额外依赖。
  */
 import { defineConfig } from 'vite';

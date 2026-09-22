@@ -1,10 +1,7 @@
 <script lang="ts">
 	/**
-	 * 手柄调试页 /debug/pad
-	 *
-	 * 用途：在 OBS 之外用普通浏览器打开，快速判断「手柄没反应」是
-	 * 设备/驱动问题、API 问题，还是 OBS 的问题（见 docs/design.md §2.4）。
-	 * 显示设备名、mapping、原始轴值、每个按键的实时数值。
+	 * 手柄调试页 /debug/pad：在 OBS 之外用普通浏览器打开，快速判断「手柄没反应」是
+	 * 设备/驱动、API 还是 OBS 的问题（见 docs/design.md §2.4）。
 	 */
 	import { GamepadReader } from '$lib/client/gamepad';
 	import { PadMockReader } from '$lib/client/pad-mock';
@@ -20,7 +17,7 @@
 		pressed: false
 	};
 
-	/* 注意：变量名不能叫 state —— 会与 $state rune 冲突（svelte-check 报 store 错误） */
+	/* 变量名不能叫 state —— 会与 $state rune 冲突 */
 	let pad = $state<PadState>(EMPTY);
 	/** 是否支持 Gamepad API */
 	let supported = $state(true);

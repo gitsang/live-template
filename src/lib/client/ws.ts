@@ -1,9 +1,6 @@
 /**
- * 弹幕 WebSocket 客户端。
- *
- * - 指数退避重连（0.5s → 10s，带抖动）
- * - 重连时带上最后收到的事件 id，服务端据此补发断线期间遗漏的弹幕
- * - 通过回调把 hello / status / danmaku 交给 UI
+ * 弹幕 WebSocket 客户端：指数退避重连（0.5s → 10s，带抖动），
+ * 重连时带上最后收到的事件 id 让服务端补发遗漏弹幕。
  */
 import type { DanmakuItem, ServerMessage, StatusEvent } from '$lib/shared/types';
 
@@ -71,7 +68,7 @@ export class DanmakuClient {
 
 		const base = this.opt.url ?? defaultUrl();
 		const params = new URLSearchParams({ room: this.opt.room });
-		/* 重连时带上水位线，让服务端补发；首次连接不带，改用磁盘回显 */
+		/* 重连带上水位线让服务端补发；首次连接不带，改用磁盘回显 */
 		if (this.#greeted && this.#lastId > 0) params.set('since', String(this.#lastId));
 
 		const ws = new WebSocket(`${base}?${params.toString()}`);
@@ -106,7 +103,7 @@ export class DanmakuClient {
 		switch (msg.t) {
 			case 'hello':
 				this.#greeted = true;
-				/* 回显里最后一条的 id 作为水位线，避免与后续实时重复 */
+				/* 回显最后一条的 id 作为水位线，避免与后续实时重复 */
 				if (msg.echo.length > 0) {
 					this.#lastId = Math.max(this.#lastId, msg.echo[msg.echo.length - 1].id);
 				}

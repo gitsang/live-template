@@ -1,11 +1,9 @@
 /**
- * Gamepad 读取器。
+ * Gamepad 读取器（见 docs/design.md §2.4）。
  *
- * 关键点（见 docs/design.md §2.4）：
- * - Chromium 只会在收到一次按键后才把设备暴露给 navigator.getGamepads()，
- *   因此无条件持续轮询，不依赖 gamepadconnected 事件。
- * - 只在状态真正变化时回调，避免每帧触发 Svelte 重渲染。
- * - 无手柄时需要回调一次未连接状态，让 UI 显示唤醒提示。
+ * Chromium 只会在收到一次按键后才把设备暴露给 navigator.getGamepads()，
+ * 因此无条件持续轮询，不依赖 gamepadconnected 事件。无手柄时也要回调一次未连接状态，
+ * 让 UI 显示唤醒提示；只在状态真正变化时回调，避免每帧触发重渲染。
  */
 import {
 	AXES,

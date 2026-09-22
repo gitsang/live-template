@@ -1,8 +1,7 @@
 <script lang="ts">
 	/**
-	 * 像素精灵：ASCII 点阵 → SVG。
-	 * '#' = 强调色，'+' = 挖空（用面板底色填回），'.' = 透明。
-	 * 想换图案直接改 SPRITES 里的字符画（每行等长即可）。
+	 * 像素精灵：ASCII 点阵 → SVG。'#' = 强调色，'+' = 挖空（用面板底色填回），'.' = 透明。
+	 * 换图案直接改 SPRITES 里的字符画，每行等长即可。
 	 */
 	export const SPRITES: Record<string, string[]> = {
 		/* 8×8 老式显示器 */

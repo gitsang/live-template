@@ -1,13 +1,7 @@
 <script lang="ts">
 	/**
-	 * 聊天框内容区。
-	 *
-	 * - 上旧下新，最新在底部
-	 * - 内容超出高度才滚动，始终自动吸底
-	 * - 长文换行（overflow-wrap: anywhere）
-	 * - 进场淡入
-	 * - DOM 上限 300 条，超出移除最旧
-	 * - 追加/裁剪时用 FLIP 位移动画，保证既有条目平滑上移而不跳变
+	 * 聊天框内容区。上旧下新、超出高度才滚动并始终吸底、长文换行、进场淡入，
+	 * DOM 上限 300 条，追加/裁剪时用 FLIP 保证既有条目平滑上移而不跳变。
 	 */
 	import Panel from './Panel.svelte';
 	import ChatRow from './ChatRow.svelte';

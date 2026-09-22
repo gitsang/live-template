@@ -17,12 +17,10 @@
 	/* 已配置登录态（服务端判定，扫码成功后无需刷新即可更新） */
 	const loggedIn = $derived(Boolean((data as { auth?: boolean }).auth));
 
-	/**
-	 * 弹幕数据源：mock 时完全离线。
-	 *
+	/*
 	 * 用 $effect 而不是直接调用：createDanmakuFeed 会建立 WebSocket 连接，
-	 * 必须在客户端挂载后运行，并且随 room/mock 变化重建（返回的 stop() 负责
-	 * 关闭旧连接）。直接写在组件体里会捕获初始值且会在 SSR 阶段执行。
+	 * 必须在客户端挂载后运行，并随 room/mock 变化重建（stop() 关闭旧连接）。
+	 * 写在组件体里会捕获初始值，且会在 SSR 阶段执行。
 	 */
 	let feed = $state.raw<DanmakuFeed | null>(null);
 

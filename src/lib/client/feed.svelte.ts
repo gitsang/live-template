@@ -1,12 +1,6 @@
 /**
- * 弹幕数据源（Svelte 5 runes）。
- *
- * 组件里 `const feed = createDanmakuFeed({ room, mock })` 后：
- * - feed.items      当前弹幕列表（最多 MAX_ITEMS 条）
- * - feed.status     房间连接状态
- * - feed.realRoom   真实房间号
- *
- * mock 模式下不连服务端，本地造弹幕，便于离线开发。
+ * 弹幕数据源（Svelte 5 runes）：feed.items（最多 MAX_ITEMS 条）、feed.status、
+ * feed.realRoom。mock 模式下不连服务端，本地造弹幕以便离线开发。
  */
 import { DanmakuClient } from './ws';
 import { MockDanmakuSource } from './mock';
@@ -39,14 +33,14 @@ export function createDanmakuFeed(options: DanmakuFeedOptions): DanmakuFeed {
 	let mockId = 0;
 
 	const push = (event: DanmakuItem): void => {
-		/* 数组整体替换：ChatBox 依赖引用变化触发 FLIP */
+		/* 整体替换数组：ChatBox 依赖引用变化触发 FLIP */
 		items = items.length >= max ? [...items.slice(1 - max + 1), event] : [...items, event];
 	};
 
 	/* ---- mock 模式：不连服务端 ---- */
 	if (options.mock) {
 		const src = new MockDanmakuSource((event) => {
-			/* 本地 mock 没有服务端 id，这里补一个自增 id 供 {#each} 做 key */
+			/* 本地 mock 没有服务端 id，补一个自增 id 供 {#each} 做 key */
 			push({ ...event, id: ++mockId });
 		});
 		src.start();
