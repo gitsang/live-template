@@ -52,27 +52,20 @@ export const NAME_COLORS = [
 ] as const;
 
 /**
- * 由用户标识稳定散列出一个用户名颜色。
+ * 由用户标识稳定散列出用户名颜色，种子优先级：**user_hash > uid > 昵称**。
  *
- * 种子优先级：**user_hash > uid > 昵称**。
- *
- * 为什么 hash 优先：实测 B 站对未登录观众返回 `uid = 0` 且昵称被打码
- * （`赛***`），只有 `info[0][15].extra.user_hash` 能区分不同观众。
- * 若以 uid 为先，全场观众会塌成同一个颜色。昵称只是最后兜底 ——
- * 打码后大量观众会撞名。
- *
- * 同一个种子永远得到同一个颜色（观众能形成「这个颜色是谁」的记忆），
- * 且相邻种子会落到不同颜色上（乘 2654435761 是一个常用的散列乘子）。
+ * hash 优先是因为实测未登录观众的 uid 恒为 0 且昵称被打码，只有 user_hash 能区分
+ * 不同观众；以 uid 为先会让全场塌成同一个颜色，昵称打码后则大量撞名。
  */
 export function nameColor(seed: number | string, name = ''): string {
 	const key = typeof seed === 'string' ? seed.trim() : '';
 
 	let h: number;
 	if (key) {
-		/* user_hash 是数字串（可能超出安全整数），逐字符 FNV-1a 更稳 */
+		/* user_hash 是数字串（可能超出安全整数），逐字符散列更稳 */
 		h = fnv1a(key);
 	} else if (seed && Number.isFinite(Number(seed)) && Number(seed) !== 0) {
-		/* Knuth 乘法散列，避免连续 uid 得到相邻颜色 */
+		/* 乘法散列，避免连续 uid 得到相邻颜色 */
 		h = Math.imul(Number(seed), 2654435761) >>> 0;
 	} else {
 		h = fnv1a(name);
@@ -104,10 +97,7 @@ export function guardColor(guard: number): string {
 	return GUARD_META[guard]?.color ?? '';
 }
 
-/**
- * 金额展示：整数不带小数，非整数保留两位。
- * SC 价格都是整数元，但保留这条以防后续接 B 站以外的数据源。
- */
+/** 整数不带小数，非整数保留两位（SC 都是整数元，保留这条以防接入别的数据源） */
 export function formatPrice(price: number): string {
 	if (!Number.isFinite(price) || price <= 0) return '0';
 	return Number.isInteger(price) ? String(price) : price.toFixed(2);
@@ -115,9 +105,8 @@ export function formatPrice(price: number): string {
 
 /**
  * 从 SC / 礼物主题色里挑一个适合做强调色的。
- *
- * B 站下发的 SC 渐变色往往很浅（为了配它自己的浅色卡片），
- * 直接拿来当深色主题的边框/色条会刺眼，因此取亮度最低的一端。
+ * B 站下发的渐变色往往很浅（配它自己的浅色卡片），直接当深色主题的边框会刺眼，
+ * 因此取亮度最低的一端。
  */
 export function pickAccent(...candidates: string[]): string {
 	const valid = candidates.filter((c) => /^#[0-9a-fA-F]{6}$/.test(c));
@@ -143,10 +132,8 @@ export function luminance(hex: string): number {
 }
 
 /**
- * 一行聊天记录的左侧强调色。
- *
- * 必须由外层 `.chat-row` 使用：CSS 自定义属性只向下继承，
- * 若把 --row-accent 设在子元素上，父级的 ::before 色条拿不到它。
+ * 一行聊天记录的左侧强调色。必须设在外层 .chat-row 上：CSS 自定义属性只向下继承，
+ * 设在子元素上父级的 ::before 色条就拿不到它。
  */
 export function itemAccent(item: DanmakuItem): string {
 	if (item.t === 'sc') return pickAccent(item.colorBottom, item.colorEnd, item.colorStart);

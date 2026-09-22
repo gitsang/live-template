@@ -1,8 +1,6 @@
 /**
  * 客户端视图开关。
- *
  * 优先级：URL 查询参数 > 服务端注入的配置（config.json / 环境变量）> 内置默认值。
- * 服务端配置由 /api/config 提供，在页面挂载前通过 `data` 属性或 fetch 注入。
  */
 import { browser } from '$app/environment';
 
@@ -42,10 +40,7 @@ export function parseBool(v: string | null | undefined): boolean | undefined {
 	return undefined;
 }
 
-/**
- * 从 URL 与（服务端下发的）基础配置合并出最终视图开关。
- * `base` 通常来自 config，键名与 ViewOptions 一致。
- */
+/** 合并 URL 与服务端配置得到最终视图开关；base 键名与 ViewOptions 一致 */
 export function resolveViewOptions(search: string, base?: Partial<ViewOptions>): ViewOptions {
 	const q = new URLSearchParams(search);
 

@@ -50,11 +50,9 @@ export const AXES = { LX: 0, LY: 1, RX: 2, RY: 3 } as const;
 export const DEADZONE = 0.08;
 
 /*
- * 摇杆可视几何（与 theme.css 中的 .pad-stick 保持一致）。
- * 圆点的最大行程必须按像素算：
- *   行程 = 摇杆半径 − 边框 − 圆点半径
- * 若改用 translate(100%) 之类的百分比，百分比会基于圆点自身尺寸（24px）
- * 而不是摇杆，行程会明显偏小（实测只有 12px，跑不满摇杆）。
+ * 摇杆可视几何（与 theme.css 的 .pad-stick 一致）。
+ * 圆点行程必须按像素算（摇杆半径 − 边框 − 圆点半径）：改用 translate(100%) 时百分比
+ * 基于圆点自身尺寸（24px）而非摇杆，行程会明显偏小（实测只有 12px，跑不满摇杆）。
  */
 export const STICK_SIZE = 78;
 export const STICK_BORDER = 2;

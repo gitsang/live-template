@@ -1,11 +1,8 @@
 /**
- * 版面几何 —— 唯一事实来源。
+ * 版面几何 —— 唯一事实来源，数值来自 statics/basic-framework.html。
+ * theme.css 里的同名变量只是静态镜像（保证无 JS 时也能渲染），运行时会用这里的值覆盖。
  *
- * 全部数值来自 statics/basic-framework.html 的 :root 变量与 flex 推导结果。
- * theme.css 里的同名变量只是同值的静态镜像（保证无 JS 时也能正确渲染），
- * 运行时会由 Scene.svelte / BoxFrame.svelte 用这里的值以内联变量覆盖。
- *
- * 画布坐标系 = 1080p 下的真实像素，OBS 中即 1:1，可直接用于对齐采集源。
+ * 画布坐标系 = 1080p 下真实像素，OBS 中即 1:1，可直接用于对齐采集源。
  */
 
 export const CANVAS = { w: 1920, h: 1080 } as const;
@@ -95,10 +92,8 @@ export const BOXES = {
 export type BoxName = keyof typeof BOXES;
 
 /**
- * 各面板的**外框**矩形（含边框与标题栏）。
- *
- * 这是 OBS 里该填的数值：`/only/<box>` 页渲染的是完整面板，
- * 所以浏览器源的宽高与位置应照这里填，叠在整页画布上才能像素级对齐。
+ * 各面板的**外框**矩形（含边框与标题栏），即 OBS 里该填的数值：
+ * /only/<box> 渲染的是完整面板，浏览器源的宽高与位置照这里填才能像素级对齐。
  */
 export const PANELS = {
 	video: {

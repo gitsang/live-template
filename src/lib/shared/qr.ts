@@ -1,21 +1,11 @@
 /**
  * 二维码渲染（纯函数，无 Node 依赖）。
  *
- * ## 别把这当成安全边界
- *
- * 把二维码渲染成 SVG 而不是把 URL 交给前端，是个**实现选择**，
- * 不是安全措施：**二维码就是 `qrcode_key` 的图形编码**，两者等价。
- * 已实测：把本模块产出的 SVG 解码回来，即可还原出 key 并拿去独立轮询。
- *
- * 所以「只暴露图、不暴露 key」提供不了任何保护。真正保护凭据的是
- * 那个访问口令（见 server/login.ts 顶部注释）。
- *
- * 选择服务端渲染的实际理由是：
- *   - 前端不需要引入二维码依赖
- *   - 排版与配色完全由服务端控制，风格统一
- *   - 将来若真要换成不编码 key 的方案（如服务端代理轮询），改一处即可
- *
- * 放在 shared 下是因为它不依赖 Node，既能被服务端调用，也方便单测。
+ * **别把这当成安全边界**：二维码就是 qrcode_key 的图形编码，两者等价 ——
+ * 实测把本模块产出的 SVG 解码回来即可还原 key 并独立轮询，
+ * 所以「只暴露图、不暴露 key」提供不了任何保护。真正保护凭据的是访问口令
+ * （见 server/login.ts）。服务端渲染的实际理由是前端不必引入二维码依赖、
+ * 配色由服务端统一控制，以及将来换成不编码 key 的方案只需改一处。
  */
 import qrcode from 'qrcode-generator';
 
@@ -55,11 +45,9 @@ export function qrMatrix(text: string, errorCorrection: 'L' | 'M' | 'Q' | 'H' = 
 }
 
 /**
- * XML 转义。
- *
- * 颜色值来自配置，理论上可能被写成 `"/><script>…` 这种形态；
- * 直接拼进 SVG 属性就是一个注入点。SVG 会被当作图片渲染，
- * 但仍应转义 —— 防御不该依赖「调用方不会传坏值」这种假设。
+ * XML 转义。颜色值来自配置，理论上可能被写成 `"/><script>…` 这种形态，
+ * 直接拼进 SVG 属性就是注入点。SVG 会当图片渲染，但仍应转义 ——
+ * 防御不该依赖「调用方不会传坏值」这种假设。
  */
 function esc(v: string): string {
 	return v
@@ -73,15 +61,12 @@ function esc(v: string): string {
 /**
  * 把文本渲染成 SVG 字符串。
  *
- * 自己拼 SVG 而不是用库的 `createSvgTag`，是为了控制配色 ——
- * 模板是像素风，二维码需要跟着走深色底 + 亮色模块，
- * 而库的默认输出是硬编码的黑白。
- *
- * 用单个 `<path>` 承载所有深色模块，而不是每格一个 `<rect>`：
- * 45×45 的码有近千个深色块，逐个 rect 会让 SVG 体积翻数倍。
+ * 自己拼而不库的 createSvgTag 是为了控制配色（像素风需要深色底 + 亮色模块，
+ * 库默认硬编码黑白）。用单个 <path> 而非每格一个 <rect>：45×45 的码有近千个
+ * 深色块，逐个 rect 会让体积翻数倍。
  */
 export function qrSvg(text: string, options: QrRenderOptions = {}): string {
-	/* 静默区不足会被扫码器裁掉定位图案，这里做下限保护而不是相信调用方 */
+	/* 静默区不足会被扫码器裁掉定位图案 */
 	const margin = Math.max(QR_MIN_MARGIN, options.margin ?? QR_MIN_MARGIN);
 	const cell = Math.max(1, options.cell ?? 8);
 	const dark = options.dark ?? '#0e111d';

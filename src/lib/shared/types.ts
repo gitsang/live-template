@@ -1,6 +1,5 @@
 /**
- * 前后端共用的弹幕事件类型。
- * 服务端产出 / 落盘 / 广播，客户端消费 —— 三处共用同一份定义。
+ * 前后端共用的弹幕事件类型：服务端产出 / 落盘 / 广播，客户端消费。
  */
 
 /** 事件基类：id 由事件总线统一分配，用于断线补发 */
@@ -18,16 +17,14 @@ export interface DanmakuEvent extends Base {
 	uid: number;
 	/**
 	 * 发送者稳定标识（B 站下发的 user_hash）。
-	 *
-	 * 实测 uid 恒为 0、昵称被打码（`赛***`），只有这个 hash 能区分用户，
-	 * 因此用户名着色**以它为首选种子**（见 $lib/shared/chat.ts 的 nameColor）。
+	 * uid 恒为 0、昵称可能被打码，只有它能区分用户，故用户名着色以它为首选种子。
 	 */
 	uh: string;
 	/** 发送者昵称，未登录时可能被打码 */
 	u: string;
 	/** 正文 */
 	m: string;
-	/** B 站下发的正文颜色（十进制 RGB）。本期统一渲染白色，原色仅落盘。 */
+	/** B 站下发的正文颜色（十进制 RGB）。渲染统一用白色，原色仅落盘。 */
 	color: number;
 	/** 用户等级 UL */
 	lv: number;
@@ -67,10 +64,8 @@ export interface GiftEvent extends Base {
 /**
  * 醒目留言（Super Chat）。
  *
- * 颜色字段来自 B 站下发的 SC 主题：`colorStart/colorEnd` 是渐变两端，
- * `colorBottom` 是底栏色。它们通常是浅色（面向 B 站浅色主题），
- * 直接当背景会和本项目的深色像素风冲突，因此渲染时只取其中较深的一个
- * 作为强调色，背景仍用深色底。
+ * colorStart/colorEnd/colorBottom 都是面向 B 站浅色主题的浅色，直接当背景会与本项目
+ * 的深色像素风冲突，因此渲染时只取其中较深的一个作强调色，背景仍用深色底。
  */
 export interface SuperChatEvent extends Base {
 	t: 'sc';
@@ -111,9 +106,8 @@ export type ItemOf<T extends DanmakuKind> = Extract<DanmakuItem, { t: T }>;
 /**
  * 尚未分配事件 id 的条目。
  *
- * 注意必须写成两个 Omit 的联合，而不是 `Omit<DanmakuItem, 'id'>`：
- * 后者作用在联合类型上会坍缩成各成员的**公共键**，弹幕独有的 m/lv 等
- * 会被丢掉，导致 publish() 拒绝正确的输入。
+ * 必须写成两个 Omit 的联合而不是 Omit<DanmakuItem, 'id'>：后者作用在联合类型上会
+ * 坍缩成各成员的**公共键**，弹幕独有的 m/lv 等会被丢掉，publish() 会拒绝正确输入。
  */
 export type DanmakuInput =
 	| Omit<DanmakuEvent, 'id'>
@@ -180,14 +174,10 @@ export type ClientMessage = SubscribeMessage | PongMessage;
 /* ---------------- 扫码登录（服务端 → 客户端） ---------------- */
 
 /**
- * 扫码状态。
+ * 扫码状态。放在 shared 而非服务端模块：它是 HTTP 接口的契约，前端组件要引用。
  *
- * 放在 shared 而非服务端模块：它现在是 HTTP 接口的契约，
- * 前端组件需要引用它。
- *
- * 注意 `timeout` 与 `expired` 是**两个不同状态**：
- * `expired` 指 B 站判定二维码失效（86038），`timeout` 指本地等待超时
- * （通常仍是 86101 未扫码）。混为一谈会向使用者输出
+ * timeout 与 expired 是**两个不同状态**：expired 指 B 站判定二维码失效（86038），
+ * timeout 指本地等待超时（通常仍是 86101 未扫码）。混为一谈会输出
  * 「二维码已过期（状态码 86101）」这种自相矛盾的提示。
  */
 export type QrStatus = 'pending' | 'scanned' | 'success' | 'expired' | 'timeout' | 'unknown';
@@ -197,7 +187,7 @@ export interface LoginStatusResponse {
 	ok: boolean;
 	status: QrStatus;
 	text: string;
-	/** 二维码 SVG（仅开起时与显式请求时下发） */
+	/** 二维码 SVG（仅在开起挑战时下发） */
 	svg?: string;
 	account?: { uid: number; uname: string };
 	error?: string;
