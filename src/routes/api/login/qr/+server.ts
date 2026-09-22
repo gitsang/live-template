@@ -6,17 +6,18 @@
  * 因为图 = 凭据等价物（持有 key 的人在扫码成功后能领走 Cookie，
  * 而 B 站轮询接口不校验任何身份）。
  *
- * 必须带 `x-login-token`，理由见 login.ts 顶部注释。
+ * 需要有效的**管理会话 Cookie**（先访问 /admin 登入），理由见 login.ts 顶部注释。
  */
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { checkLoginToken, getLoginSession } from '$lib/server/login-service';
+import { ADMIN_COOKIE } from '$lib/server/admin-session';
+import { checkAdminSession, getLoginSession } from '$lib/server/login-service';
 import { createLogger } from '$lib/server/logger';
 
 const log = createLogger('login');
 
-export const POST: RequestHandler = async ({ request }) => {
-	const error = checkLoginToken(request.headers.get('x-login-token'));
+export const POST: RequestHandler = async ({ cookies }) => {
+	const error = checkAdminSession(cookies.get(ADMIN_COOKIE));
 	if (error) {
 		/*
 		 * 只记「被拒绝」这一事实，不记口令内容 ——

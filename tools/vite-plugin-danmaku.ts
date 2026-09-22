@@ -55,7 +55,7 @@ export function danmakuDevPlugin(): Plugin {
 			);
 			if (config.loginToken) {
 				server.config.logger.info(
-					`[live-template] 网页登录已开启（HUD → 登录），访问口令: ${config.loginToken}`
+					`[live-template] 管理页已开启: /admin （访问口令: ${config.loginToken}）`
 				);
 			}
 

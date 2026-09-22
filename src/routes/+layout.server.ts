@@ -21,9 +21,7 @@ export const load: LayoutServerLoad = () => {
 
 	return {
 		view: toViewOptions(config),
-		/* hub 不可用（如构建期）时退回配置值 */
-		auth: hub ? hub.hasAuth : Boolean(config.biliCookie),
-		/* 网页登录是否开启：用于决定 HUD 是否显示登录入口 */
-		loginEnabled: Boolean(config.loginToken)
+		/* hub 不可用（如构建期）时退回配置值；HUD 据此把管理入口标成「已登录」 */
+		auth: hub ? hub.hasAuth : Boolean(config.biliCookie)
 	};
 };

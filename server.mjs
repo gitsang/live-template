@@ -50,9 +50,9 @@ server.listen(config.port, config.host, () => {
 	 * 因此**不要**把它写进任何会被采集/上报的日志级别里（这里是 stdout 一次）。
 	 */
 	if (config.loginToken) {
-		console.log(`[live-template] 网页登录已开启（HUD → 登录），访问口令: ${config.loginToken}`);
+		console.log(`[live-template] 管理页已开启: /admin （访问口令: ${config.loginToken}）`);
 	} else {
-		console.log('[live-template] 网页登录未开启（设置 LOGIN_TOKEN 可启用）；可用 npm run login 在终端扫码');
+		console.log('[live-template] 管理页未开启（设置 LOGIN_TOKEN 可启用）；可用 npm run login 在终端扫码');
 	}
 	console.log('[live-template] OBS 浏览器源: /?hole=1  (1920x1080)');
 });

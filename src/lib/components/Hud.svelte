@@ -7,7 +7,6 @@
 	 * 出现在直播画面里，但为了保险仍默认关闭。
 	 */
 	import { page } from '$app/state';
-	import LoginPanel from './LoginPanel.svelte';
 
 	interface Props {
 		/** 当前视图开关，用于按钮高亮 */
@@ -22,14 +21,11 @@
 	let { labels, guides, transparent, hole, loggedIn = false }: Props = $props();
 
 	let visible = $state(false);
-	let loginOpen = $state(false);
 	let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function show(): void {
 		visible = true;
 		if (hideTimer) clearTimeout(hideTimer);
-		/* 登录面板开着时不要自动隐藏控制条，否则面板会显得没有归属 */
-		if (loginOpen) return;
 		hideTimer = setTimeout(() => (visible = false), 2800);
 	}
 
@@ -53,12 +49,7 @@
 		return () => window.removeEventListener('mousemove', onMove);
 	});
 
-	/*
-	 * 面板开着时阻止快捷键切换视图：在输入口令时按到 l/g/b/h
-	 * 会直接重载页面（toggle 是改 URL 参数），把已输入的流程全丢掉。
-	 */
 	function onKeydown(e: KeyboardEvent): void {
-		if (loginOpen) return;
 		const k = e.key.toLowerCase();
 		if (k === 'l') toggle('label', labels);
 		if (k === 'g') toggle('guide', guides);
@@ -77,13 +68,15 @@
 	<div class="sep"></div>
 	<button onclick={copyObsUrl}>复制 OBS 地址</button>
 	<div class="sep"></div>
-	<button class:on={loggedIn} onclick={() => (loginOpen = !loginOpen)}>
-		{loggedIn ? '已登录' : '登录'}
-	</button>
+	<!--
+		管理入口是**普通链接**，跳转到独立页面。
+		刻意不在画布上放二维码：HUD 只在鼠标移动时出现（OBS 不派发鼠标事件），
+		但那是依赖 OBS 行为的间接保证；把登录移出画布才是结构性保证。
+	-->
+	<a class="admin-link" class:on={loggedIn} href="/admin" target="_blank" rel="noopener">
+		{loggedIn ? '管理 · 已登录' : '管理'}
+	</a>
 	<div class="sep"></div>
 	<span class="tip">OBS: 1920×1080 · /only/chat 474×630 · /only/pad 474×304</span>
 </div>
 
-{#if loginOpen}
-	<LoginPanel onClose={() => (loginOpen = false)} />
-{/if}

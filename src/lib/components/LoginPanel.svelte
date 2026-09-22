@@ -1,12 +1,14 @@
 <script lang="ts">
 	/**
-	 * 扫码登录面板。
+	 * B 站扫码登录面板（管理页内使用，内联而非弹窗）。
 	 *
-	 * 设计约束：
-	 * - 二维码由**服务端**渲染成 SVG 下发（注意：这只是实现选择，
-	 *   图本身就等同于 key，安全边界是访问口令，不是「不下发 key」）
-	 * - 访问口令只存在内存 + sessionStorage，绝不用 localStorage（跨会话残留更危险）
-	 * - 面板关闭即停止轮询，避免在后台空转打扰 B 站接口
+	 * 授权由**管理会话 Cookie** 负责（见 admin-session.ts），
+	 * 因此本组件不再接触访问口令 —— 口令只在 /admin 的登入表单里出现一次。
+	 * 早先的实现把口令存进 sessionStorage 并附在请求头里，那会让长期凭据
+	 * 暴露在前端 JS 中，已移除。
+	 *
+	 * 二维码由服务端渲染成 SVG 下发。注意这只是实现选择，**不是**安全边界：
+	 * 图本身就是 qrcode_key 的图形编码（已实测可解码还原）。
 	 */
 	import type { QrStatus } from '$lib/shared/types';
 
@@ -20,15 +22,12 @@
 	}
 
 	interface Props {
-		onClose: () => void;
+		/** 登录完成（或用户主动结束）后的回调，由页面决定是否刷新 */
+		onClose?: () => void;
 	}
 
 	let { onClose }: Props = $props();
 
-	const TOKEN_KEY = 'live-template.login-token';
-
-	/* 口令：sessionStorage 而非 localStorage —— 关掉标签页即失效 */
-	let token = $state(sessionStorage.getItem(TOKEN_KEY) ?? '');
 	let status = $state<Status | null>(null);
 	let busy = $state(false);
 	let error = $state('');
@@ -43,13 +42,11 @@
 	}
 
 	async function call(path: string, init: RequestInit = {}): Promise<Status | null> {
-		const res = await fetch(path, {
-			...init,
-			headers: { ...(init.headers ?? {}), 'x-login-token': token }
-		});
+		const res = await fetch(path, init);
 		const body = (await res.json()) as { ok: boolean; error?: string } & Partial<Status>;
 		if (!res.ok || !body.ok) {
 			error = body.error ?? `请求失败（HTTP ${res.status}）`;
+			stopPolling();
 			return null;
 		}
 		error = '';
@@ -64,9 +61,6 @@
 		try {
 			const s = await call('/api/login/qr', { method: 'POST' });
 			if (!s) return;
-
-			/* 口令正确才记住，避免把打错的串留在会话里 */
-			sessionStorage.setItem(TOKEN_KEY, token);
 			status = s;
 
 			/*
@@ -81,20 +75,18 @@
 
 	async function poll(): Promise<void> {
 		const s = await call('/api/login/status');
-		if (!s) {
-			/* 口令错或被拒就停掉，别无限重试 */
-			stopPolling();
-			return;
-		}
+		if (!s) return;
+
 		/*
 		 * 保留上一份 SVG。
-		 * 轮询接口**不会**回传二维码图（每 2s 传几十 KB 纯属浪费，而且码本身不变），
+		 * 轮询接口**不会**回传二维码图（图即凭据等价物，且码本身不变），
 		 * 所以直接 status = s 会把图抹掉 —— 表现为「刚出图就消失」，
 		 * 只剩下状态文字，根本没法扫。
 		 * 登录成功后不再保留：此时码已无用，界面只显示账号信息。
 		 */
 		const keepSvg = s.status === 'success' ? undefined : (s.svg ?? status?.svg);
 		status = { ...s, svg: keepSvg };
+
 		if (s.status === 'success' || s.status === 'expired') stopPolling();
 	}
 
@@ -107,30 +99,12 @@
 	$effect(() => () => stopPolling());
 </script>
 
-<div class="mask" onclick={onClose} role="presentation"></div>
-
-<div class="dialog" role="dialog" aria-label="扫码登录">
-	<header>
-		<span>扫码登录</span>
-		<button class="x" onclick={onClose} aria-label="关闭">✕</button>
-	</header>
-
+<div class="panel">
 	{#if !status}
-		<p class="hint">
-			用 B 站 App 扫码即可登录，昵称将不再被打码。<br />
-			需要访问口令（服务端启动日志里的 <code>LOGIN_TOKEN</code>）。
-		</p>
-		<div class="row">
-			<input
-				type="password"
-				placeholder="访问口令"
-				bind:value={token}
-				onkeydown={(e) => e.key === 'Enter' && start()}
-			/>
-			<button class="primary" onclick={start} disabled={busy || !token}>
-				{busy ? '生成中…' : '生成二维码'}
-			</button>
-		</div>
+		<p class="hint">用 B 站 App 扫码即可登录，登录后昵称不再被打码。</p>
+		<button class="primary" onclick={start} disabled={busy}>
+			{busy ? '生成中…' : '生成二维码'}
+		</button>
 	{:else}
 		<div class="qr" class:dim={failed}>
 			{#if status.svg}
@@ -161,7 +135,7 @@
 				<button onclick={cancel}>取消</button>
 			{/if}
 			{#if done}
-				<button class="primary" onclick={onClose}>完成</button>
+				<button class="primary" onclick={() => onClose?.()}>完成</button>
 			{/if}
 		</div>
 	{/if}
@@ -172,82 +146,18 @@
 </div>
 
 <style>
-	.mask {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		z-index: 100;
-	}
-
-	.dialog {
-		position: fixed;
-		left: 50%;
-		top: 50%;
-		transform: translate(-50%, -50%);
-		width: 340px;
-		padding: 14px;
-		background: rgba(14, 17, 29, 0.98);
-		border: 2px solid var(--edge-dk);
-		box-shadow:
-			0 0 0 2px rgba(255, 255, 255, 0.12),
-			8px 8px 0 rgba(0, 0, 0, 0.55);
-		z-index: 101;
-		color: #cfd4e6;
-		font-size: 12.5px;
-	}
-
-	header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 10px;
-		font-size: 13px;
-		color: #fff;
-	}
-
-	.x {
-		background: none;
-		border: none;
-		color: #8891ad;
-		cursor: pointer;
-		font-size: 14px;
-		padding: 2px 6px;
-	}
-
-	.x:hover {
-		color: #fff;
+	.panel {
+		margin-top: 12px;
 	}
 
 	.hint {
-		margin: 0 0 12px;
-		line-height: 1.65;
+		margin: 0 0 10px;
+		line-height: 1.7;
 		color: #8891ad;
 	}
 
-	code {
-		color: #ffd479;
-	}
-
-	.row {
-		display: flex;
-		gap: 8px;
-	}
-
-	input {
-		flex: 1;
-		min-width: 0;
-		height: 30px;
-		padding: 0 8px;
-		background: #1b2136;
-		border: 2px solid var(--edge-dk);
-		box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
-		color: #fff;
-		font-family: inherit;
-		font-size: 12.5px;
-	}
-
 	button {
-		height: 30px;
+		height: 32px;
 		padding: 0 12px;
 		cursor: pointer;
 		background: #1b2136;
@@ -277,7 +187,7 @@
 	.qr {
 		display: flex;
 		justify-content: center;
-		padding: 8px;
+		padding: 10px;
 		background: #e8ecff;
 		border: 2px solid var(--edge-dk);
 	}
@@ -285,7 +195,7 @@
 	.qr :global(svg) {
 		display: block;
 		width: 100%;
-		max-width: 232px;
+		max-width: 260px;
 		height: auto;
 	}
 
@@ -311,7 +221,6 @@
 
 	.bad {
 		margin: 8px 0 0;
-		text-align: center;
 		color: #ff8080;
 		line-height: 1.6;
 	}

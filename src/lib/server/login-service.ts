@@ -7,6 +7,7 @@
  * 但两者在同一进程内，因此沿用 registry.ts 的 Symbol.for 桥接方式。
  */
 import { getNavInfo } from './bili/api';
+import { verifySession } from './admin-session';
 import { loadConfig } from './config';
 import { DEFAULT_COOKIE_FILE, safeEqual, writeCookieFile } from './credential';
 import { LoginSession } from './login';
@@ -88,7 +89,7 @@ export function getLoginSession(): LoginSession {
  * 校验访问口令。
  *
  * 返回 `null` 表示通过；否则返回给客户端的错误文案。
- * 抽成函数是为了让三个路由（开起/轮询/取消）用同一份判断，
+ * 抽成函数是为了让开起/轮询/取消/管理页用同一份判断，
  * 避免某个路由漏检 —— 漏一个就等于全没防。
  */
 export function checkLoginToken(provided: string | null): string | null {
@@ -101,6 +102,34 @@ export function checkLoginToken(provided: string | null): string | null {
 
 	/* 恒定时间比较，避免通过响应耗时逐字节猜口令 */
 	if (!safeEqual(provided.trim(), expected)) return '访问口令不正确';
+
+	return null;
+}
+
+/** 当前生效的访问口令（空串 = 网页登录未开启） */
+export function currentToken(): string {
+	return (process.env.LOGIN_TOKEN ?? loadConfig().loginToken ?? '').trim();
+}
+
+/** 网页登录是否已开启 */
+export function loginEnabled(): boolean {
+	return currentToken() !== '';
+}
+
+/**
+ * 校验管理会话。
+ *
+ * 这是所有管理接口与 `/admin` 页面的**唯一**入口判断。
+ * 注意与 `checkLoginToken` 的区别：那个验的是口令本身（只在登入时用一次），
+ * 这个验的是口令派生出的签名会话 Cookie —— 口令不进浏览器 JS 存储。
+ *
+ * 返回 `null` 表示已授权。
+ */
+export function checkAdminSession(sessionValue: string | undefined | null): string | null {
+	const token = currentToken();
+	if (!token) return '网页登录未开启（未配置 LOGIN_TOKEN）';
+
+	if (!verifySession(sessionValue, token)) return '未登录或会话已过期，请重新进入管理页';
 
 	return null;
 }

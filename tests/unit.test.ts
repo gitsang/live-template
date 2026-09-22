@@ -27,6 +27,13 @@ import {
 	writeCookieFile
 } from '../src/lib/server/credential.ts';
 import { QR_MIN_MARGIN, qrMatrix, qrSvg } from '../src/lib/shared/qr.ts';
+import {
+	ADMIN_TTL_MS,
+	sessionCookieOptions,
+	isSecureRequest,
+	issueSession,
+	verifySession
+} from '../src/lib/server/admin-session.ts';
 import { LoginSession } from '../src/lib/server/login.ts';
 import {
 	QR_CODE,
@@ -953,6 +960,98 @@ test('默认凭据路径与文档/容器挂载点保持一致', () => {
 	 * 否则会出现「扫码成功但服务仍匿名」这种极难排查的现象。
 	 */
 	assert.equal(DEFAULT_COOKIE_FILE, 'secrets/bili-cookie.txt');
+});
+
+/* ==================== 管理会话签名 ==================== */
+
+const TOKEN = 'unit-test-token';
+
+test('管理会话：签发的会话可被校验通过', () => {
+	const s = issueSession(TOKEN);
+	assert.equal(verifySession(s, TOKEN), true);
+});
+
+test('管理会话：换口令即失效（轮换口令 = 吊销所有会话）', () => {
+	/*
+	 * 密钥由口令派生，所以改 LOGIN_TOKEN 等于立刻让所有已下发的会话失效。
+	 * 这是无状态签名方案的代价与收益：不能单独吊销某一个，但轮换是彻底的。
+	 */
+	const s = issueSession(TOKEN);
+	assert.equal(verifySession(s, 'another-token'), false);
+});
+
+test('管理会话：篡改签名或过期时间都不通过', () => {
+	const s = issueSession(TOKEN);
+	const [exp, sig] = s.split('.');
+
+	assert.equal(verifySession(`${exp}.${sig}x`, TOKEN), false, '签名尾部被改');
+	assert.equal(verifySession(`${exp}.x${sig.slice(1)}`, TOKEN), false, '签名首部被改');
+	/* 把过期时间往后改，签名就对不上了 —— 这正是签名的意义 */
+	assert.equal(verifySession(`${Number(exp) + 100_000}.${sig}`, TOKEN), false, '延长过期时间');
+});
+
+test('管理会话：过期后不通过', () => {
+	const now = 1_700_000_000_000;
+	const s = issueSession(TOKEN, now);
+
+	assert.equal(verifySession(s, TOKEN, now + 1000), true, '有效期内应通过');
+	assert.equal(verifySession(s, TOKEN, now + ADMIN_TTL_MS - 1), true, '临到期前应通过');
+	assert.equal(verifySession(s, TOKEN, now + ADMIN_TTL_MS + 1), false, '过期后应拒绝');
+});
+
+test('管理会话：空值、空口令、畸形输入一律拒绝', () => {
+	for (const bad of [undefined, null, '', 'no-dot', '.sig', 'abc.sig', '123.', '12.34']) {
+		assert.equal(verifySession(bad as string, TOKEN), false, `应拒绝: ${String(bad)}`);
+	}
+	/* 未配置口令时必须拒绝，而不是「没有口令就等于放行」 */
+	assert.equal(verifySession(issueSession(TOKEN), ''), false, '空口令不得放行');
+});
+
+test('管理会话：不同口令签发的会话互不通融', () => {
+	const a = issueSession('token-a');
+	const b = issueSession('token-b');
+	assert.equal(verifySession(a, 'token-b'), false);
+	assert.equal(verifySession(b, 'token-a'), false);
+	assert.equal(verifySession(a, 'token-a'), true);
+	assert.equal(verifySession(b, 'token-b'), true);
+});
+
+test('管理会话：两次签发同一时刻结果为确定值（便于断言）', () => {
+	const now = 1_700_000_000_000;
+	assert.equal(issueSession(TOKEN, now), issueSession(TOKEN, now));
+});
+
+test('管理会话 Cookie：HttpOnly + SameSite=Strict + Path=/', () => {
+	const o = sessionCookieOptions(false);
+	assert.equal(o.httpOnly, true, 'JS 必须读不到（XSS 也偷不走）');
+	assert.equal(o.sameSite, 'strict', '管理操作有副作用，必须防 CSRF');
+	assert.equal(o.path, '/', '需在 /admin 与 /api/login/* 上都能带上');
+	assert.equal(o.maxAge, Math.floor(ADMIN_TTL_MS / 1000));
+});
+
+test('管理会话 Cookie：secure 必须随实际协议，不能写死', () => {
+	/*
+	 * 回归测试：SvelteKit 的 cookie 默认 secure 除 localhost 外全为 true。
+	 * 本项目 compose 默认把端口发布到 0.0.0.0，即从局域网 http 访问，
+	 * 此时若带 Secure，浏览器会**直接丢弃** Cookie ——
+	 * 表现为「登入提示成功但页面依旧未授权」，极难排查。
+	 */
+	assert.equal(sessionCookieOptions(false).secure, false, 'http 下不得加 Secure');
+	assert.equal(sessionCookieOptions(true).secure, true, 'https 下应加 Secure');
+});
+
+test('isSecureRequest 识别协议与反向代理头', () => {
+	const mk = (proto: string, xfp?: string) =>
+		isSecureRequest(
+			new Request('http://example.com/', xfp ? { headers: { 'x-forwarded-proto': xfp } } : undefined),
+			new URL(proto + '://example.com/')
+		);
+
+	assert.equal(mk('https'), true);
+	assert.equal(mk('http'), false);
+	assert.equal(mk('http', 'https'), true, '反代终止 TLS 时应识别');
+	assert.equal(mk('http', 'https, http'), true, '多级代理取第一段');
+	assert.equal(mk('https', 'http'), false, 'XFP 优先于 url');
 });
 
 /* ==================== 二维码渲染 ==================== */

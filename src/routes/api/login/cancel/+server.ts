@@ -7,10 +7,11 @@
  */
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { checkLoginToken, getLoginSession } from '$lib/server/login-service';
+import { ADMIN_COOKIE } from '$lib/server/admin-session';
+import { checkAdminSession, getLoginSession } from '$lib/server/login-service';
 
-export const POST: RequestHandler = ({ request }) => {
-	const error = checkLoginToken(request.headers.get('x-login-token'));
+export const POST: RequestHandler = ({ cookies }) => {
+	const error = checkAdminSession(cookies.get(ADMIN_COOKIE));
 	if (error) return json({ ok: false, error }, { status: 401 });
 
 	const session = getLoginSession();

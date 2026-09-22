@@ -176,7 +176,7 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
 | --- | --- |
 | 本机/SSH 有 Node | `npm run login` |
 | 只有 Docker | `docker compose run --rm login` |
-| 想用浏览器 | 配 `LOGIN_TOKEN` → 打开 `/?hud=1` → 点「登录」 |
+| 想用浏览器 | 配 `LOGIN_TOKEN` → 打开 **`/admin`** → 输入口令 → 扫码 |
 
 #### 终端扫码
 
@@ -199,7 +199,7 @@ npm run login
 docker compose run --rm login
 ```
 
-#### 浏览器扫码
+#### 浏览器扫码（管理页）
 
 在 `.env` 里设一个访问口令，然后重启：
 
@@ -210,11 +210,19 @@ LOGIN_TOKEN=随便一串足够长的口令
 口令会打印在启动日志里（仅此一次）：
 
 ```
-[live-template] 网页登录已开启（HUD → 登录），访问口令: xxxxxxxx
+[live-template] 管理页已开启: /admin （访问口令: xxxxxxxx）
 ```
 
-打开 `/?hud=1`，点控制条上的「登录」，输入口令即可看到二维码。
+打开 **`/admin`**，输入口令进入，再点「生成二维码」用 B 站 App 扫码。
 扫码成功后服务会**自动热重载**登录态，无需重启。
+
+管理页只在**已授权**时才下发「B 站是否已登录」这类运行信息；
+未授权时连这些都不返回。
+
+> **为什么是独立页面，而不是 OBS 画布上的按钮：**
+> 二维码绝不能出现在直播画面里。放在 HUD 上时，安全性依赖「OBS 不派发鼠标事件、
+> 且 HUD 默认关闭」这个间接前提；移到独立页面后，画布上**根本不存在**这个东西 ——
+> 这是结构性保证，不依赖 OBS 的行为。
 
 > **为什么建议设口令：** 二维码图**就是** `qrcode_key` 的图形编码，而持有 key 的人
 > 就能在扫码成功后领走凭据（实测：轮询接口不校验任何身份，且把 SVG 解码即可还原 key）。
@@ -224,7 +232,11 @@ LOGIN_TOKEN=随便一串足够长的口令
 > 口令**防不住**二维码钓鱼（B 站的生成接口是公开的，谁都能自己造码）——
 > 那是二维码登录固有的属性，别把两者搞混。详见设计文档。
 >
-> 不设 `LOGIN_TOKEN` 时网页登录**默认关闭**，仍可用上面两条命令扫码。
+> 口令只在登入时提交一次，服务端随即换成 **HttpOnly 会话 Cookie**，
+> 口令本身不进浏览器存储。会话有效期 7 天；**轮换 `LOGIN_TOKEN` 即等于
+> 吊销所有已下发的会话**。
+>
+> 不设 `LOGIN_TOKEN` 时管理页**默认关闭**，仍可用上面两条命令扫码。
 
 #### 让凭据生效
 
@@ -264,6 +276,12 @@ Cookie 从浏览器开发者工具里复制（需含 `DedeUserID` 字段）。
 
 ### 关于凭据安全
 
+- **管理会话**：口令只在校验时出现一次，服务端随即下发 `HttpOnly` + 签名 的
+  Cookie（`SameSite=Strict` 防 CSRF）。前端 JS 拿不到口令，也不存口令。
+  会话有效期 7 天，**轮换 `LOGIN_TOKEN` 即立刻吊销全部会话**。
+- `Secure` 属性按实际协议决定，**不写死**：本项目 compose 默认发布到 `0.0.0.0`，
+  从局域网 `http://` 访问时若带上 `Secure`，浏览器会直接丢弃 Cookie，
+  表现为「登入成功但依旧未授权」。这是实测踩到的坑。
 - 唯一的日志出口是 `redactCookie()`：`SESSDATA` / `bili_jct` 等一律显示为 `***`，
   `buvid` 只留前 8 位；`DedeUserID` 原样显示（公开 uid，便于排查登错号）。
 - 技术细节：弹幕服务器的认证包**只靠 `uid` 字段声称身份**，Cookie 并不会发给它
@@ -325,6 +343,12 @@ Cookie 从浏览器开发者工具里复制（需含 `DedeUserID` 字段）。
 | `GET /api/health`     | 运行状态：房间、连接状态、配置、对齐尺寸        |
 | `GET /api/self-test`  | 注入 3 条测试弹幕，验证「WS → 渲染」链路        |
 | `WS /ws?room=&since=` | 弹幕推送（`hello` → `status`/`danmaku`/`ping`） |
+| `GET /admin`          | 管理页：扫码登录 B 站（需 `LOGIN_TOKEN`，见上） |
+| `POST /api/admin/login`  | 用口令换取管理会话 Cookie（HttpOnly）        |
+| `POST /api/admin/logout` | 清除管理会话                                 |
+| `POST /api/login/qr`     | 开起扫码挑战（需管理会话）                   |
+| `GET /api/login/status`  | 轮询扫码状态（需管理会话；**不回传二维码图**）|
+| `POST /api/login/cancel` | 取消当前扫码流程（需管理会话）               |
 
 排查「弹幕没上来」：
 
@@ -347,9 +371,12 @@ curl -s localhost:8080/api/self-test     # 能看到测试弹幕 → 渲染链�
 │  │  ├─ components/           Scene / Panel / Sprite / ChatBox / PadBox / …
 │  │  ├─ client/               ws / gamepad / mock / feed
 │  │  ├─ server/               config / logger / hub / store / eventbus / ws-server
-│  │  │  └─ bili/              api / packet / client（B 站采集）
-│  │  └─ shared/               types / geometry / pad / chat / view
-│  └─ routes/                  +page / only/[box] / debug/pad / api/*
+│  │  │  ├─ bili/              api / packet / client / qrlogin（B 站采集与扫码）
+│  │  │  ├─ admin-session.ts   管理会话签名（HMAC，无状态）
+│  │  │  ├─ login.ts           扫码登录状态机
+│  │  │  └─ credential.ts      凭据落盘（权限 600）
+│  │  └─ shared/               types / geometry / pad / chat / view / qr
+│  └─ routes/                  +page / only/[box] / debug/pad / admin / api/*
 ├─ server.mjs                  生产入口（HTTP + /ws）
 ├─ Containerfile / compose.yml
 └─ tests/unit.test.ts          单测（无测试框架）
