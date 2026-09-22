@@ -1,10 +1,9 @@
 /**
  * 网页登录的单例装配。
  *
- * 为什么要走 globalThis 而不是模块级变量：生产环境下
- * `build/handler.js`（SvelteKit 产物）与 `build/danmaku/entry.js`（服务端产物）
- * 是两次独立打包，各有自己的模块实例，模块级单例互不可见。
- * 但两者在同一进程内，因此沿用 registry.ts 的 Symbol.for 桥接方式。
+ * 走 globalThis 而不是模块级变量：生产环境下 build/handler.js（SvelteKit 产物）
+ * 与 build/danmaku/entry.js（服务端产物）是两次独立打包，各有自己的模块实例，
+ * 模块级单例互不可见。但两者在同一进程内，因此沿用 registry.ts 的 Symbol.for 桥接方式。
  */
 import { getNavInfo } from './bili/api';
 import { verifySession } from './admin-session';
@@ -24,12 +23,9 @@ type GlobalWithLogin = typeof globalThis & {
 };
 
 /**
- * 凭据写入路径。
- *
- * 优先沿用配置里已经在读的那个文件（`BILI_COOKIE_FILE`），
- * 这样扫码结果与读取路径天然一致 —— 否则会出现
- * 「扫码成功但仍匿名」这种极难排查的状态（这个 bug 真发生过：
- * compose 找 `/run/secrets/bili-cookie`，CLI 却写 `bili-cookie.txt`）。
+ * 凭据写入路径：用配置里正在读的那个文件（BILI_COOKIE_FILE），
+ * 这样扫码结果与读取路径天然一致。否则会出现「扫码成功但仍匿名」这种极难排查的状态
+ * （真发生过：compose 找 /run/secrets/bili-cookie，CLI 却写 bili-cookie.txt）。
  */
 function resolveCookiePath(): string {
 	const fromEnv = (process.env.BILI_COOKIE_FILE ?? '').trim();
@@ -41,9 +37,7 @@ interface HubLike {
 }
 
 /**
- * 取（或创建）登录会话单例。
- *
- * 每次都重新读配置：`LOGIN_TOKEN` 可能通过环境变量注入，
+ * 取（或创建）登录会话单例。每次都重新读配置：LOGIN_TOKEN 可能通过环境变量注入，
  * 而配置本身是进程级缓存的，这里不做额外缓存以免与缓存策略打架。
  */
 export function getLoginSession(): LoginSession {
@@ -59,10 +53,8 @@ export function getLoginSession(): LoginSession {
 			log.info(`凭据已写入 ${path}（权限 600）`);
 
 			/*
-			 * 立刻用 nav 校验并拿到昵称。
-			 * 这一步不只为了显示：它同时证明「这份凭据真的能用」，
-			 * 否则界面只能显示「登录成功」，而使用者真正关心的是
-			 * 「昵称还会不会被打码」。
+			 * 立刻用 nav 校验并拿到昵称。不只为了显示：它同时证明「这份凭据真的能用」，
+			 * 否则界面只能显示「登录成功」，而使用者真正关心的是「昵称还会不会被打码」。
 			 */
 			const nav = await getNavInfo(cookie);
 			if (!nav.isLogin || nav.uid <= 0) {
@@ -86,11 +78,8 @@ export function getLoginSession(): LoginSession {
 }
 
 /**
- * 校验访问口令。
- *
- * 返回 `null` 表示通过；否则返回给客户端的错误文案。
- * 抽成函数是为了让开起/轮询/取消/管理页用同一份判断，
- * 避免某个路由漏检 —— 漏一个就等于全没防。
+ * 校验访问口令，返回 null 表示通过。抽成函数是为了让开起/轮询/取消/管理页
+ * 用同一份判断，避免某个路由漏检 —— 漏一个就等于全没防。
  */
 export function checkLoginToken(provided: string | null): string | null {
 	const expected = (process.env.LOGIN_TOKEN ?? loadConfig().loginToken ?? '').trim();
@@ -117,13 +106,9 @@ export function loginEnabled(): boolean {
 }
 
 /**
- * 校验管理会话。
- *
- * 这是所有管理接口与 `/admin` 页面的**唯一**入口判断。
- * 注意与 `checkLoginToken` 的区别：那个验的是口令本身（只在登入时用一次），
- * 这个验的是口令派生出的签名会话 Cookie —— 口令不进浏览器 JS 存储。
- *
- * 返回 `null` 表示已授权。
+ * 校验管理会话，返回 null 表示已授权。所有管理接口与 /admin 页面的**唯一**入口判断。
+ * 与 checkLoginToken 的区别：那个验口令本身（登入时用一次），这个验口令派生出的
+ * 签名会话 Cookie —— 口令不进浏览器 JS 存储。
  */
 export function checkAdminSession(sessionValue: string | undefined | null): string | null {
 	const token = currentToken();

@@ -1,15 +1,12 @@
 /**
  * B 站弹幕 WebSocket 客户端。
  *
- * 一次 run() = 一个会话（连接成功 → 断线结束），由 RoomHub 负责重连退避。
+ * 一次 run() = 一个会话（连接成功 → 断线结束），重连退避由 RoomHub 负责。
  *
- * 关键点（全部对齐 scripts/danmaku.py 的实测结论）：
- * - 认证包必须带 buvid / support_ack / queue_uuid / scene。
- *   不带 queue_uuid 时，同房间多条连接会被当成同一消费组轮询分流，
- *   每条连接只能拿到一部分弹幕（实测差约 8 倍）。
- * - 用 443 端口而不是 host_list 返回的 wss_port，绕开对 2245/2244 的封锁。
- * - 看门狗：静默超过 75s（含心跳回包）判定为死连接，强制重连。
- *   覆盖「TCP 还活着但服务端一条不给」的场景。
+ * 几处非写成这样不可的实测结论：
+ * - 认证包必须带 buvid / support_ack / queue_uuid / scene
+ * - 用 443 而不是 host_list 返回的 wss_port，绕开对 2245/2244 的封锁
+ * - 静默超过 75s（含心跳回包）判定死连接，覆盖「TCP 还活着但服务端一条不给」
  */
 import { getBuvid, getDanmuInfo, getNavInfo, getRoomInit, type DanmuHost } from './api';
 import { buildAuthPacket, redactCookie, resolveAuth, type BiliAuth } from './session';
@@ -38,12 +35,7 @@ export interface DanmuClientEvents {
 export interface DanmuClientOptions extends DanmuClientEvents {
 	/** 房间号，支持短号 */
 	room: string;
-	/**
-	 * B 站登录态 Cookie（可选）。
-	 *
-	 * 留空即匿名：弹幕服务器会返回 `uid = 0` 且昵称被打码。
-	 * 带上后昵称恢复为真实值。⚠️ 不得写入日志（用 redactCookie）。
-	 */
+	/** 登录态 Cookie；留空即匿名（昵称会被打码）。不得直接写日志 */
 	loginCookie?: string;
 	/** 心跳间隔（B 站要求 30s 内至少一次） */
 	heartbeatMs?: number;
@@ -51,7 +43,6 @@ export interface DanmuClientOptions extends DanmuClientEvents {
 	deadAfterMs?: number;
 	/** 收包超时，保证循环能及时醒来发心跳 */
 	recvTimeoutMs?: number;
-	/** 日志 */
 	log?: (msg: string, ...args: unknown[]) => void;
 }
 
@@ -70,8 +61,8 @@ export class DanmuClient {
 	/**
 	 * 归一化后的选项。
 	 *
-	 * 这里不能用 `Required<Omit<..., 'room'|'log'>>` —— 它会把
-	 * `loginCookie` 这类语义上可选的字段也变成必填，类型就不匹配了。
+	 * 不能写 `Required<Omit<..., 'room'|'log'>>` —— 那会把 loginCookie
+	 * 这类语义上可选的字段也变成必填。
 	 */
 	readonly #opt: DanmuClientOptions & {
 		heartbeatMs: number;
@@ -94,17 +85,12 @@ export class DanmuClient {
 	/**
 	 * 本次会话的房间/宿主信息。
 	 *
-	 * 认证回应（op=8）本身不带这些字段，而 connected 状态必须有它们 ——
-	 * 否则 UI 在「连上」这一刻会丢掉房间号与开播状态（曾把 room 报成 undefined）。
-	 * 因此在 run() 解析出来后先存这里，认证成功时一并上报。
+	 * 认证回应（op=8）本身不带这些字段，而 connected 状态必须有 —— 否则 UI
+	 * 在「连上」这一刻会丢掉房间号与开播状态（曾把 room 报成 undefined）。
 	 */
 	#sessionInfo: { room: number; live: number; host: string } | null = null;
 
-	/**
-	 * 登录态配置有问题时的告警文案。
-	 * 随 status 事件上报，让 /api/health 与标题栏都能看到，
-	 * 而不是只在服务端日志里一闪而过。
-	 */
+	/** 登录态配置有问题时的告警文案，随 status 上报给 /api/health 与标题栏 */
 	#authWarning: string | null = null;
 
 	constructor(options: DanmuClientOptions) {
@@ -117,7 +103,7 @@ export class DanmuClient {
 		};
 	}
 
-	/** 请求停止（会关闭当前连接，使 run() 尽快返回） */
+	/** 请求停止（关闭当前连接，使 run() 尽快返回） */
 	stop(): void {
 		this.#stopped = true;
 		this.#clearTimers();
@@ -142,16 +128,14 @@ export class DanmuClient {
 	async run(): Promise<void> {
 		this.#opt.onStatus({ s: 'connecting' });
 
-		/* 1) 解析房间号 */
 		const { roomId, liveStatus } = await getRoomInit(this.#opt.room);
 		this.#sessionInfo = { room: roomId, live: liveStatus, host: '' };
 		this.#opt.onStatus({ s: 'connecting', room: roomId, live: liveStatus });
 
-		/* 2) 组装身份（匿名指纹 + 可选登录态），再取 token/宿主 */
 		const auth = await this.#buildAuth();
 		const { token, hosts } = await getDanmuInfo(roomId, auth.cookie);
 
-		/* 3) 依次尝试宿主，全部失败才抛出 */
+		/* 依次尝试宿主，全部失败才抛出 */
 		let lastError: unknown = null;
 		for (const host of hosts.slice(0, 5)) {
 			if (this.#stopped) return;
@@ -166,25 +150,22 @@ export class DanmuClient {
 		if (lastError) throw lastError;
 	}
 
-	/** 连接单个宿主并跑消息循环 */
 	/**
-	 * 组装连接身份：匿名设备指纹打底，配置里的登录态覆盖。
-	 *
-	 * 这里会把「是否带上了登录态」记进日志（**只记 uid 与脱敏摘要**），
-	 * 因为「昵称还是打码的」最常见原因就是 Cookie 没读到或已过期。
+	 * 组装身份：匿名设备指纹打底，配置里的登录态覆盖。
+	 * 会记日志（仅 uid 与脱敏摘要）——「昵称还是打码」最常见的原因就是
+	 * Cookie 没读到或已过期。
 	 */
 	async #buildAuth(): Promise<BiliAuth> {
 		const anonymous = await getBuvid();
 		const configured = (this.#opt.loginCookie ?? '').trim();
 
-		/* 用 nav 校验登录态：Cookie 里有 DedeUserID ≠ 服务端认可这个身份 */
 		const { auth, warning } = await resolveAuth({
 			anonymousCookie: anonymous.cookie,
 			loginCookie: configured,
 			verify: async (cookie, claimedUid) => {
 				const nav = await getNavInfo(cookie);
 				if (!nav.isLogin) return false;
-				/* uid 前后不一致说明 Cookie 被改过或串了，按无效处理 */
+				/* uid 不一致说明 Cookie 被改过或串了，按无效处理 */
 				return nav.uid === claimedUid;
 			}
 		});
@@ -198,9 +179,8 @@ export class DanmuClient {
 			this.#log('警告:', warning);
 		} else if (!configured) {
 			/*
-			 * 匿名连接时昵称会被服务端**部分**打码（实测同一用户两种形态都有），
-			 * 这是 B 站的行为、不是 bug，但值得在日志里说清楚，
-			 * 免得使用者把「有的昵称是 赛***」当成我们的问题。
+			 * 匿名时昵称被服务端**部分**打码（实测同一用户两种形态都有），
+			 * 这是 B 站的行为，说清楚免得使用者当成我们的问题。
 			 */
 			this.#log('匿名连接：部分昵称会被 B 站打码（配置 BILI_COOKIE 可缓解）');
 		}
@@ -208,6 +188,7 @@ export class DanmuClient {
 		return auth;
 	}
 
+	/** 连接单个宿主并跑消息循环 */
 	async #session(
 		host: DanmuHost,
 		roomId: number,
@@ -248,12 +229,6 @@ export class DanmuClient {
 		this.#authed = false;
 		this.#firstHeartbeatSent = false;
 
-		/*
-		 * 认证。
-		 *
-		 * uid 即「已登录」的表达：弹幕服务器的认证包只靠这个字段声称身份、
-		 * 没有签名校验，Cookie 本身并不会发给它（只用于 HTTP API）。
-		 */
 		ws.send(
 			encode(
 				OP.AUTH,
@@ -357,7 +332,7 @@ export class DanmuClient {
 			} else if (pkt.op === OP.MESSAGE) {
 				this.#handleMessage(pkt, roomId);
 			}
-			/* 心跳回应(op=3) 不需要额外处理，收到即可重置看门狗 */
+			/* 心跳回应(op=3) 不用处理，收到即可重置看门狗 */
 		}
 	}
 

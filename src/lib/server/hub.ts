@@ -1,10 +1,8 @@
 /**
  * 房间注册表（RoomHub）。
  *
- * 多房间懒加载 + 引用计数 + 空闲断开：
- * - acquire(room) 客户端订阅时调用，无会话则创建并连 B 站，计数 +1
- * - release(room) 客户端离开时调用，计数 -1
- * - 计数归零后等 idleMs（默认 60s）再断开，避免 OBS 切场景时频繁重连
+ * 多房间懒加载 + 引用计数 + 空闲断开：acquire() 时无会话则创建并连 B 站，
+ * release() 后计数归零，等 idleMs（默认 60s）再断开，避免 OBS 切场景时频繁重连。
  *
  * 每个房间持有：DanmuClient（采集）+ EventBus（广播/补发）+ DanmakuStore（落盘/回显）
  */
@@ -45,12 +43,11 @@ export class RoomSession {
 	#idleTimer: NodeJS.Timeout | null = null;
 	#stopped = false;
 	/**
-	 * 会话代次。
+	 * 会话代次，用来作废旧连接的收尾逻辑。
 	 *
-	 * 用于作废旧连接的收尾逻辑：`run()` 的 `.finally()` 会在连接真正关闭后
-	 * （异步）决定要不要重连。如果期间我们主动重连过一次，旧回调看到
-	 * `#stopped` 已被重置为 `false`，就会再安排一次重连 —— 结果两条连接同时活着。
-	 * 每次主动重连都给代次 +1，旧回调对不上号就直接放弃。
+	 * run() 的 .finally() 是异步的，会自己决定要不要重连。若期间我们已主动重连，
+	 * 旧回调看到 #stopped 被重置为 false 就会再安排一次重连 —— 两条连接同时活着。
+	 * 每次主动重连把代次 +1，旧回调对不上号就放弃。
 	 */
 	#epoch = 0;
 	/** 真实房间号（B 站解析后） */
@@ -113,13 +110,7 @@ export class RoomSession {
 	#start(): void {
 		this.#stopped = false;
 		this.#retry = 0;
-		/*
-		 * 每次启动都递增代次：这会作废所有更早连接的收尾逻辑。
-		 * 除了「登录后重连」，它还修掉了一个早已存在的竞态：
-		 * 空闲断开（stop）后若立刻 acquire()，旧连接的 `.finally()` 可能尚未执行，
-		 * 此时 `#stopped` 已被重置为 false，旧回调就会再安排一次重连
-		 * —— 于是两条连接同时活着，弹幕重复。
-		 */
+		/* 递增代次以作废旧连接的收尾逻辑，见 #epoch */
 		this.#epoch++;
 		/* 空闲断开后复用的 Store 需要重新打开 */
 		this.store.reopen();
@@ -176,7 +167,7 @@ export class RoomSession {
 				if (epoch !== this.#epoch) return;
 				if (this.#stopped || this.#refs === 0) return;
 
-				/* 指数退避重连；token 过期会由 run() 内部重新走全流程 */
+				/* 指数退避，上限 RECONNECT_MAX_MS；token 过期由 run() 内部重走全流程 */
 				this.#retry++;
 				const delay = Math.min(RECONNECT_MIN_MS * 2 ** (this.#retry - 1), RECONNECT_MAX_MS);
 				this.bus.publishStatus({
@@ -196,13 +187,13 @@ export class RoomSession {
 
 	/** mock：不连 B 站，本地造弹幕，走与真实采集完全相同的通道 */
 	#startMock(): void {
-		/* 落盘目录仍用请求的房间号，只是状态里标注 room:0 / host:MOCK */
+		/* 落盘目录仍用请求的房间号，状态里标注 room:0 / host:MOCK */
 		this.bus.publishStatus({ t: 'status', s: 'connected', room: 0, host: 'MOCK', live: 1 });
 		log.info(`房间 ${this.room} 使用 mock 弹幕源`);
 
 		const epoch = this.#epoch;
 		void import('./mock-source').then(({ MockSource }) => {
-			/* 动态 import 是异步的：期间可能已经 stop() 或重连，此时不能再启动 */
+			/* 动态 import 是异步的，期间可能已 stop() 或重连 */
 			if (epoch !== this.#epoch) return;
 			const src = new MockSource((event) => {
 				const full = this.bus.publish(event);
@@ -218,18 +209,14 @@ export class RoomSession {
 	/**
 	 * 登录态变化后重连，使新身份生效。
 	 *
-	 * 必须断开重连而不能「就地换 Cookie」：登录态是在认证包（op=7）里
-	 * 一次性发出的，已经建立的连接无法中途改变身份。
-	 *
-	 * 未在运行（refs 为 0 或已停止）时只需等下次 acquire() 自然使用新值，
-	 * 不必主动连一次——那会在没人看直播时凭空产生一次 B 站连接。
+	 * 必须断开重连：登录态是在认证包（op=7）里一次性发出的，已建立的连接无法中途改身份。
+	 * 未在运行时只需等下次 acquire() 自然用新值——否则会在没人看直播时凭空连一次 B 站。
 	 */
 	reloadAuth(): void {
 		if (!this.#running) return;
 		log.info(`房间 ${this.room} 登录态更新，重连以生效`);
 		this.stop();
-		/* stop() 会置 #stopped，这里重新起一次；refs 保持不变。
-		 * #start() 内部会递增代次，旧连接的收尾逻辑因此失效。 */
+		/* refs 保持不变；#start() 会递增代次，旧连接的收尾逻辑因此失效 */
 		this.#start();
 	}
 
@@ -262,19 +249,17 @@ export class RoomHub {
 	}
 
 	/**
-	 * 更新登录态并让正在运行的会话重连，使扫码结果**无需重启服务**即生效。
+	 * 更新登录态并让运行中的会话重连，使扫码结果**无需重启服务**即生效。
 	 *
-	 * 注意 `#opt` 是**按引用**传给每个 RoomSession 的（见构造函数），
-	 * 所以改这里的字段，所有会话（含之后新建的）都会看到新值。
-	 * 这不是巧合而是选择：登录态属于整个进程，不是某个房间的私有配置。
-	 * 换来的一点代价是——就地修改共享对象不够显式，故在此写明。
+	 * #opt 是**按引用**传给每个 RoomSession 的（见构造函数），所以改这里的字段，
+	 * 所有会话（含之后新建的）都会看到新值。就地修改共享对象不够显式，故写明。
 	 */
 	reloadAuth(loginCookie: string): void {
 		this.#opt.loginCookie = loginCookie;
 		for (const session of this.#rooms.values()) session.reloadAuth();
 	}
 
-	/** 当前是否已配置登录态（不校验有效性，仅表示「有没有传进来」） */
+	/** 是否已配置登录态（只看有没有传进来，不校验有效性） */
 	get hasAuth(): boolean {
 		return Boolean(this.#opt.loginCookie?.trim());
 	}
