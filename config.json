@@ -11,5 +11,6 @@
 	"idleMs": 60000,
 	"echoCount": 10,
 	"logLevel": "info",
-	"biliCookie": ""
+	"biliCookie": "",
+	"loginToken": ""
 }

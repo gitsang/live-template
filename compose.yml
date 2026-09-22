@@ -26,12 +26,25 @@ services:
       # 优先用文件方式：环境变量会出现在 docker inspect 与日志采集里。
       BILI_COOKIE_FILE: '${BILI_COOKIE_FILE:-/run/secrets/bili-cookie.txt}'
       BILI_COOKIE: '${BILI_COOKIE:-}'
+      # 网页扫码登录的访问口令（可选）：留空则关闭网页登录。
+      # 为什么不默认自动生成：隐式开启的认证入口是安全上的坏味道，
+      # 而且不设口令时任何人都能抢开挑战、或诱导你扫他的码（见 docs/design.md）。
+      # 开启方式：在 .env 里设 LOGIN_TOKEN=<随便一串>，然后到 HUD 里点「登录」。
+      LOGIN_TOKEN: '${LOGIN_TOKEN:-}'
     volumes:
       # 弹幕归档持久化（重启后仍能回显）
       - ./data:/app/data
-      # 登录态 Cookie 文件（可选）。放 ./secrets 下并 chmod 600，目录已 gitignore。
-      # 用 :ro 挂载，容器只读即可。
-      - ./secrets:/run/secrets:ro
+      # 凭据挂载点。
+      #
+      # 这里必须是**可写**的：网页扫码登录成功后要把新凭据写进来。
+      # 曾经同时存在两条挂载（可写 + :ro），而 Docker 取**最后一条**，
+      # 于是实际生效的是只读 —— 网页登录必然失败（实测只读挂载下写入返回 EROFS）。
+      # 只保留一条，不要重复挂载同一目标。
+      #
+      # 容器以 uid 1000 运行，与常见宿主机用户一致，因此不会出现
+      # 「文件归 root 所有、宿主机读不了」的问题。
+      # 目录已 gitignore，且凭据文件本身权限固定 600。
+      - ./secrets:/run/secrets
     # 若 OBS 在宿主机、服务在容器内，用 host 网络可避免额外的端口映射问题
     # network_mode: host
 
@@ -43,8 +56,7 @@ services:
   # 无法执行 `npm run login`。这里直接复用镜像里已打包的 login.js，
   # 因此只要 Docker 能跑就能扫码。
   #
-  # ./secrets 在这里是**可写**的（服务容器的挂载是只读的 ——
-  # 运行中的服务不需要写凭据，权限按最小化给）。
+  # ./secrets 在这里也是可写的，以便与宿主机的 `npm run login` 共用同一份凭据。
   login:
     profiles: ['tools']
     build:

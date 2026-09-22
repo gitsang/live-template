@@ -53,6 +53,11 @@ export function danmakuDevPlugin(): Plugin {
 			server.config.logger.info(
 				`[live-template] 弹幕 WS 已挂载 /ws（房间=${config.room}${config.mock ? ' MOCK' : ''}）`
 			);
+			if (config.loginToken) {
+				server.config.logger.info(
+					`[live-template] 网页登录已开启（HUD → 登录），访问口令: ${config.loginToken}`
+				);
+			}
 
 			/* dev server 关闭时清理，避免进程挂住 */
 			httpServer.once('close', () => {

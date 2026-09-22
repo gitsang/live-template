@@ -14,6 +14,9 @@
 
 	const view = $derived(resolveViewOptions(page.url.search, data.view as Partial<ViewOptions>));
 
+	/* 已配置登录态（服务端判定，扫码成功后无需刷新即可更新） */
+	const loggedIn = $derived(Boolean((data as { auth?: boolean }).auth));
+
 	/**
 	 * 弹幕数据源：mock 时完全离线。
 	 *
@@ -58,5 +61,6 @@
 		guides={view.guides}
 		transparent={view.transparent}
 		hole={view.hole}
+		{loggedIn}
 	/>
 {/if}

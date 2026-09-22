@@ -176,3 +176,30 @@ export interface PongMessage {
 
 /** 手柄等前端状态不需要上报，服务端对手柄零感知 */
 export type ClientMessage = SubscribeMessage | PongMessage;
+
+/* ---------------- 扫码登录（服务端 → 客户端） ---------------- */
+
+/**
+ * 扫码状态。
+ *
+ * 放在 shared 而非服务端模块：它现在是 HTTP 接口的契约，
+ * 前端组件需要引用它。
+ *
+ * 注意 `timeout` 与 `expired` 是**两个不同状态**：
+ * `expired` 指 B 站判定二维码失效（86038），`timeout` 指本地等待超时
+ * （通常仍是 86101 未扫码）。混为一谈会向使用者输出
+ * 「二维码已过期（状态码 86101）」这种自相矛盾的提示。
+ */
+export type QrStatus = 'pending' | 'scanned' | 'success' | 'expired' | 'timeout' | 'unknown';
+
+/** 登录接口响应 */
+export interface LoginStatusResponse {
+	ok: boolean;
+	status: QrStatus;
+	text: string;
+	/** 二维码 SVG（仅开起时与显式请求时下发） */
+	svg?: string;
+	account?: { uid: number; uname: string };
+	error?: string;
+	remainingMs: number;
+}

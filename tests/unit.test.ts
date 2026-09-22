@@ -20,10 +20,14 @@ import { EventBus } from '../src/lib/server/eventbus.ts';
 import { randomQueueUuid } from '../src/lib/server/bili/client.ts';
 import {
 	DEFAULT_COOKIE_FILE,
+	generateToken,
 	isRestrictive,
 	readCookieFile,
+	safeEqual,
 	writeCookieFile
 } from '../src/lib/server/credential.ts';
+import { QR_MIN_MARGIN, qrMatrix, qrSvg } from '../src/lib/shared/qr.ts';
+import { LoginSession } from '../src/lib/server/login.ts';
 import {
 	QR_CODE,
 	QR_STATUS_TEXT,
@@ -949,6 +953,333 @@ test('默认凭据路径与文档/容器挂载点保持一致', () => {
 	 * 否则会出现「扫码成功但服务仍匿名」这种极难排查的现象。
 	 */
 	assert.equal(DEFAULT_COOKIE_FILE, 'secrets/bili-cookie.txt');
+});
+
+/* ==================== 二维码渲染 ==================== */
+
+test('qrMatrix 输出奇数模块数（二维码规范要求）', () => {
+	for (const text of ['a', 'https://example.com/', 'x'.repeat(200)]) {
+		const m = qrMatrix(text);
+		assert.equal(m.count % 2, 1, `内容长度 ${text.length} 时模块数应为奇数`);
+		assert.ok(m.count >= 21, '最小版本为 21 模块');
+	}
+});
+
+test('qrMatrix 空内容抛错而不是产出无效码', () => {
+	assert.throws(() => qrMatrix(''), /不能为空/);
+});
+
+test('qrMatrix 相同输入结果稳定（同一内容必须出同一张图）', () => {
+	const a = qrMatrix('https://example.com/stable');
+	const b = qrMatrix('https://example.com/stable');
+	assert.equal(a.count, b.count);
+	for (let r = 0; r < a.count; r++) {
+		for (let c = 0; c < a.count; c++) {
+			assert.equal(a.isDark(r, c), b.isDark(r, c), `(${r},${c}) 不一致`);
+		}
+	}
+});
+
+test('qrSvg 产出合法 SVG 且含深色模块', () => {
+	const svg = qrSvg('https://example.com/x');
+	assert.ok(svg.startsWith('<svg '), '应以 <svg 开头');
+	assert.ok(svg.endsWith('</svg>'), '应以 </svg> 结尾');
+	assert.ok(svg.includes('<path'), '应有承载模块的 path');
+	assert.ok(svg.includes('viewBox='), '应有 viewBox 以便缩放');
+	assert.ok(svg.includes('shape-rendering="crispEdges"'), '像素风需要关闭抗锯齿');
+});
+
+test('qrSvg 静默区不低于规范下限 4 模块', () => {
+	/*
+	 * 静默区是二维码能被识别的必要条件，缺了定位图案会被裁掉。
+	 * 这里验证下限保护真的生效 —— 调用方传 0 也不该画出无法扫描的码。
+	 */
+	for (const margin of [0, 1, -5]) {
+		const svg = qrSvg('https://example.com/m', { margin, cell: 4 });
+		const n = qrMatrix('https://example.com/m').count;
+		const expected = (n + QR_MIN_MARGIN * 2) * 4;
+		assert.ok(
+			svg.includes(`viewBox="0 0 ${expected} ${expected}"`),
+			`margin=${margin} 时尺寸应仍按下限 ${QR_MIN_MARGIN} 计算`
+		);
+	}
+});
+
+test('qrSvg 转义颜色值，避免 SVG 注入', () => {
+	const svg = qrSvg('https://example.com/i', {
+		dark: '"/><script>alert(1)</script><path d="'
+	});
+	assert.ok(!svg.includes('<script'), '不得出现未转义的 <script>');
+	assert.ok(svg.includes('&lt;script&gt;'), '应转义为实体');
+	assert.ok(!svg.includes('"/><script'), '不得破坏属性结构');
+});
+
+test('qrSvg 尺寸随 cell 线性增长', () => {
+	const small = qrSvg('https://example.com/s', { cell: 4 });
+	const big = qrSvg('https://example.com/s', { cell: 8 });
+	const w = (svg: string): number => Number(svg.match(/width="(\d+)"/)![1]);
+	assert.equal(w(big), w(small) * 2);
+});
+
+/* ==================== 恒定时间比较与令牌 ==================== */
+
+test('safeEqual 正确判定相等与不等', () => {
+	assert.equal(safeEqual('abc', 'abc'), true);
+	assert.equal(safeEqual('abc', 'abd'), false);
+	assert.equal(safeEqual('abc', 'abcd'), false, '长度不同应为 false 而非抛错');
+	assert.equal(safeEqual('', ''), false, '空串不得视为相等，否则等于无口令放行');
+	assert.equal(safeEqual('abc', ''), false);
+});
+
+test('generateToken 长度正确且字面不易混淆', () => {
+	for (let i = 0; i < 30; i++) {
+		const t = generateToken(6);
+		assert.equal(t.length, 6);
+		/* 去掉 0/O、1/l/I 等易混字符，因为要人工从终端抄进网页 */
+		assert.ok(!/[01loIO]/.test(t), `不应含易混字符: ${t}`);
+	}
+});
+
+test('generateToken 多次调用不重复', () => {
+	const seen = new Set(Array.from({ length: 50 }, () => generateToken(8)));
+	assert.equal(seen.size, 50, '50 次生成应互不相同');
+});
+
+/* ==================== 登录会话状态机 ==================== */
+
+/** 造一个可控的登录会话，网络层全部替换成假实现 */
+function makeSession(over: Partial<ConstructorParameters<typeof LoginSession>[0]> = {}) {
+	const calls = { success: 0, svg: 0 };
+	const session = new LoginSession({
+		renderSvg: (url) => {
+			calls.svg++;
+			return `<svg data-url="${url}"/>`;
+		},
+		onSuccess: async () => {
+			calls.success++;
+			return { uid: 1557129, uname: '测试账号' };
+		},
+		...over
+	});
+	return { session, calls };
+}
+
+test('LoginSession 初始无活动挑战', () => {
+	const { session } = makeSession();
+	assert.equal(session.active, false);
+});
+
+test('LoginSession 取消后回到无活动状态', async () => {
+	const { session } = makeSession();
+	await session.start();
+	assert.equal(session.active, true);
+	const after = session.cancel();
+	assert.equal(session.active, false);
+	assert.equal(after.status, 'pending');
+});
+
+test('LoginSession 在节流窗口内不重复打 B 站接口', async () => {
+	/*
+	 * 节流必须在服务端做：前端的 setInterval 可被绕过，
+	 * 一个刷新循环就能把 B 站轮询接口打到限流。
+	 */
+	let now = 1_000_000;
+	let polls = 0;
+	const { session } = makeSession({
+		now: () => now,
+		pollOnce: async () => {
+			polls++;
+			return { status: 'pending', cookie: '', redirectUrl: '', rawCode: 86101 };
+		}
+	});
+
+	await session.start();
+
+	/* 连续 5 次调用都落在 900ms 节流窗口内 → 只应真正打 1 次网络 */
+	for (let i = 0; i < 5; i++) {
+		now += 10;
+		await session.poll();
+	}
+	assert.equal(polls, 1, `节流窗口内应只请求 1 次，实际 ${polls} 次`);
+
+	/* 越过窗口后再调用应放行 */
+	now += 1_000;
+	await session.poll();
+	assert.equal(polls, 2, '越过节流窗口后应放行');
+});
+
+test('LoginSession 成功后结算，onSuccess 只调用一次', async () => {
+	/*
+	 * 关键回归：成功路径若未及时置 settled，
+	 * 后续轮询会重复调用 onSuccess —— 重复写凭据文件、重复重连采集。
+	 *
+	 * 注意两道防线是分层的：同一节流窗口内的并发轮询会被**节流**挡掉
+	 * （返回快照，不透传），而 settled 负责挡掉窗口之后的所有重放。
+	 * 这里验证的是后者。
+	 */
+	let now = 1_000_000;
+	const { session, calls } = makeSession({
+		now: () => now,
+		pollOnce: async () => ({
+			status: 'success',
+			cookie: 'SESSDATA=abc; DedeUserID=1557129',
+			redirectUrl: '',
+			rawCode: 0
+		})
+	});
+
+	await session.start();
+
+	now += 1_000;
+	const first = await session.poll();
+	assert.equal(first.status, 'success');
+	assert.equal(calls.success, 1, `首次成功应调用 onSuccess 1 次，实际 ${calls.success}`);
+	assert.equal(first.account?.uid, 1557129);
+	assert.equal(first.account?.uname, '测试账号');
+	assert.equal(session.active, false, '结算后不应再有活动挑战');
+
+	/* 越过节流窗口再轮询多次：状态仍是 success，但不得重复结算 */
+	for (let i = 0; i < 3; i++) {
+		now += 5_000;
+		const again = await session.poll();
+		assert.equal(again.status, 'success', '应保持成功状态');
+		assert.equal(again.account?.uid, 1557129, '账号信息应仍在快照里');
+	}
+	assert.equal(calls.success, 1, `onSuccess 不得重复调用，实际 ${calls.success} 次`);
+});
+
+test('LoginSession 同一节流窗口内的并发轮询不透传成功', async () => {
+	/*
+	 * 记录真实语义：节流命中时返回的是**快照**，不推进状态。
+	 * 因此并发轮询不会让成功被重复结算 —— 这是 settled 之外的独立防线。
+	 */
+	let now = 1_000_000;
+	const { session, calls } = makeSession({
+		now: () => now,
+		pollOnce: async () => ({
+			status: 'success',
+			cookie: 'SESSDATA=abc',
+			redirectUrl: '',
+			rawCode: 0
+		})
+	});
+
+	await session.start();
+	now += 1_000;
+
+	/* 三个调用同一时刻发起：只有第一个能进入网络层 */
+	const results = await Promise.all([session.poll(), session.poll(), session.poll()]);
+	const successCount = results.filter((r) => r.status === 'success').length;
+
+	assert.equal(successCount, 1, `只有首个应成功，实际 ${successCount} 个`);
+	assert.equal(calls.success, 1, 'onSuccess 只应调用一次');
+});
+
+test('LoginSession 成功但无凭据时报错而非静默降级匿名', async () => {
+	/*
+	 * 「登录成功但拿不到 SESSDATA」必须显式报错：
+	 * 静默降级会让使用者以为登录成功了，之后才发现昵称还在打码。
+	 */
+	let now = 1_000_000;
+	const { session, calls } = makeSession({
+		now: () => now,
+		pollOnce: async () => ({ status: 'success', cookie: '', redirectUrl: '', rawCode: 0 })
+	});
+
+	await session.start();
+	now += 1_000;
+	const s = await session.poll();
+
+	assert.equal(s.status, 'unknown');
+	assert.match(s.error ?? '', /SESSDATA/);
+	assert.equal(calls.success, 0, '无凭据时不应调用 onSuccess');
+});
+
+test('LoginSession 网络抖动不终结流程，且错误可见', async () => {
+	let now = 1_000_000;
+	let attempt = 0;
+	const { session } = makeSession({
+		now: () => now,
+		pollOnce: async () => {
+			attempt++;
+			if (attempt === 1) throw new Error('ECONNRESET');
+			return { status: 'pending', cookie: '', redirectUrl: '', rawCode: 86101 };
+		}
+	});
+
+	await session.start();
+
+	now += 1_000;
+	const first = await session.poll();
+	/* 错误要透出去，否则界面会一直停在「等待扫码」，无法区分「没人扫」和「网络挂了」 */
+	assert.match(first.error ?? '', /ECONNRESET/);
+	assert.equal(session.active, true, '网络抖动后流程应仍然可继续');
+
+	now += 1_000;
+	const second = await session.poll();
+	assert.equal(second.status, 'pending');
+});
+
+test('LoginSession onSuccess 抛错时把原因暴露给界面', async () => {
+	let now = 1_000_000;
+	const { session } = makeSession({
+		now: () => now,
+		onSuccess: async () => {
+			throw new Error('EROFS: read-only file system');
+		},
+		pollOnce: async () => ({
+			status: 'success',
+			cookie: 'SESSDATA=abc',
+			redirectUrl: '',
+			rawCode: 0
+		})
+	});
+
+	await session.start();
+	now += 1_000;
+	const s = await session.poll();
+
+	assert.match(s.error ?? '', /凭据保存失败/);
+	assert.match(s.error ?? '', /EROFS/);
+});
+
+test('LoginSession 本地超时置为 expired 而非 timeout', async () => {
+	/*
+	 * 回归：超时（未扫码）与过期（B 站判失效）语义不同。
+	 * 混淆会向使用者输出「二维码已过期（状态码 86101）」这种自相矛盾的提示。
+	 */
+	let now = 5_000_000;
+	const { session } = makeSession({ now: () => now });
+	await session.start();
+
+	/* 直接跳过 TTL（175s） */
+	now += 200_000;
+	const s = await session.poll();
+	assert.equal(s.status, 'expired');
+	assert.equal(s.remainingMs, 0);
+	assert.equal(session.active, false, '过期后不应再有活动挑战');
+});
+
+test('LoginSession 快照默认不带 SVG，显式请求才带', async () => {
+	/* 轮询是高频调用，每次都塞几十 KB 的 SVG 纯属浪费 */
+	const { session } = makeSession();
+	const started = await session.start();
+	assert.ok(started.svg, '开起时应带图，否则界面没东西可显示');
+
+	const plain = session.cancel();
+	assert.equal(plain.svg, undefined, '取消后的快照不应带图');
+});
+
+test('LoginSession 剩余时间随时钟递减', async () => {
+	let now = 0;
+	const { session } = makeSession({ now: () => now });
+	const started = await session.start();
+	const t0 = started.remainingMs;
+
+	now += 60_000;
+	const later = await session.poll();
+	assert.ok(later.remainingMs < t0, `剩余时间应减少: ${t0} -> ${later.remainingMs}`);
+	assert.ok(later.remainingMs > 0);
 });
 
 /* ==================== 聊天框配色与格式化 ==================== */

@@ -32,3 +32,6 @@ vite.config.ts.timestamp-*
 /secrets
 *.cookie
 bili-cookie.txt
+
+# agent-browser 的临时浏览器 profile（含 63MB 缓存，不该入库）
+/browser-data

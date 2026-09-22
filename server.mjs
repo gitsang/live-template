@@ -44,6 +44,16 @@ server.listen(config.port, config.host, () => {
 	console.log(
 		`[live-template] 身份=${config.biliCookie ? '已配置登录态（连接时校验）' : '匿名（部分昵称会被打码）'}`
 	);
+	/*
+	 * 网页登录入口：把口令打印在启动日志里（仅此处出现一次）。
+	 * 这是有意为之 —— 口令要人工从终端抄进网页，而日志是运维看得到的地方。
+	 * 因此**不要**把它写进任何会被采集/上报的日志级别里（这里是 stdout 一次）。
+	 */
+	if (config.loginToken) {
+		console.log(`[live-template] 网页登录已开启（HUD → 登录），访问口令: ${config.loginToken}`);
+	} else {
+		console.log('[live-template] 网页登录未开启（设置 LOGIN_TOKEN 可启用）；可用 npm run login 在终端扫码');
+	}
 	console.log('[live-template] OBS 浏览器源: /?hole=1  (1920x1080)');
 });
 

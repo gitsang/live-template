@@ -170,7 +170,15 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
 
 ### 扫码登录（推荐）
 
-不用手抄 Cookie，跑一条命令用手机扫一下即可：
+三种方式，按你的场景选：
+
+| 场景 | 做法 |
+| --- | --- |
+| 本机/SSH 有 Node | `npm run login` |
+| 只有 Docker | `docker compose run --rm login` |
+| 想用浏览器 | 配 `LOGIN_TOKEN` → 打开 `/?hud=1` → 点「登录」 |
+
+#### 终端扫码
 
 ```bash
 npm run login
@@ -191,10 +199,41 @@ npm run login
 docker compose run --rm login
 ```
 
-然后在 `.env` 里设置：
+#### 浏览器扫码
+
+在 `.env` 里设一个访问口令，然后重启：
 
 ```bash
+LOGIN_TOKEN=随便一串足够长的口令
+```
+
+口令会打印在启动日志里（仅此一次）：
+
+```
+[live-template] 网页登录已开启（HUD → 登录），访问口令: xxxxxxxx
+```
+
+打开 `/?hud=1`，点控制条上的「登录」，输入口令即可看到二维码。
+扫码成功后服务会**自动热重载**登录态，无需重启。
+
+> **为什么必须设口令：** 二维码登录里，**持有 `qrcode_key` 的人就能领走凭据**
+> （实测：轮询接口不校验任何身份）。若不设访问控制，任何人都能抢开挑战，
+> 或把自己的二维码诱导给你扫。**这与 HTTPS 无关** —— 攻击者走的是你自己的
+> 合法接口，全程加密也没用。详见设计文档。
+>
+> 不设 `LOGIN_TOKEN` 时网页登录**默认关闭**，仍可用上面两条命令扫码。
+
+#### 让凭据生效
+
+无论用哪种方式，服务都要知道去读哪个文件：
+
+```bash
+# 本机
 BILI_COOKIE_FILE=./secrets/bili-cookie.txt
+
+# 容器：注意这里写的是**容器内**路径（compose.yml 已默认设好）
+# 宿主机上的 ./secrets 挂载到 /run/secrets
+BILI_COOKIE_FILE=/run/secrets/bili-cookie.txt
 ```
 
 ### 手动配置（备选）

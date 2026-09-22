@@ -44,6 +44,15 @@ export class RoomSession {
 	#refs = 0;
 	#idleTimer: NodeJS.Timeout | null = null;
 	#stopped = false;
+	/**
+	 * 会话代次。
+	 *
+	 * 用于作废旧连接的收尾逻辑：`run()` 的 `.finally()` 会在连接真正关闭后
+	 * （异步）决定要不要重连。如果期间我们主动重连过一次，旧回调看到
+	 * `#stopped` 已被重置为 `false`，就会再安排一次重连 —— 结果两条连接同时活着。
+	 * 每次主动重连都给代次 +1，旧回调对不上号就直接放弃。
+	 */
+	#epoch = 0;
 	/** 真实房间号（B 站解析后） */
 	#realRoom: number | null = null;
 
@@ -104,6 +113,14 @@ export class RoomSession {
 	#start(): void {
 		this.#stopped = false;
 		this.#retry = 0;
+		/*
+		 * 每次启动都递增代次：这会作废所有更早连接的收尾逻辑。
+		 * 除了「登录后重连」，它还修掉了一个早已存在的竞态：
+		 * 空闲断开（stop）后若立刻 acquire()，旧连接的 `.finally()` 可能尚未执行，
+		 * 此时 `#stopped` 已被重置为 false，旧回调就会再安排一次重连
+		 * —— 于是两条连接同时活着，弹幕重复。
+		 */
+		this.#epoch++;
 		/* 空闲断开后复用的 Store 需要重新打开 */
 		this.store.reopen();
 		this.bus.publishStatus({ t: 'status', s: 'connecting' });
@@ -117,6 +134,7 @@ export class RoomSession {
 
 	/** 起一次会话；结束后按退避重连 */
 	#runClient(): void {
+		const epoch = this.#epoch;
 		const client = new DanmuClient({
 			room: this.room,
 			loginCookie: this.opt.loginCookie,
@@ -154,6 +172,8 @@ export class RoomSession {
 			})
 			.finally(() => {
 				this.#client = null;
+				/* 代次变了说明已经被主动重连/停止接管，旧回调不能再插手 */
+				if (epoch !== this.#epoch) return;
 				if (this.#stopped || this.#refs === 0) return;
 
 				/* 指数退避重连；token 过期会由 run() 内部重新走全流程 */
@@ -167,6 +187,7 @@ export class RoomSession {
 				log.info(`房间 ${this.room} ${delay}ms 后重连（第 ${this.#retry} 次）`);
 				this.#mockTimer = setTimeout(() => {
 					this.#mockTimer = null;
+					if (epoch !== this.#epoch) return;
 					if (this.#stopped || this.#refs === 0) return;
 					this.#runClient();
 				}, delay);
@@ -179,7 +200,10 @@ export class RoomSession {
 		this.bus.publishStatus({ t: 'status', s: 'connected', room: 0, host: 'MOCK', live: 1 });
 		log.info(`房间 ${this.room} 使用 mock 弹幕源`);
 
+		const epoch = this.#epoch;
 		void import('./mock-source').then(({ MockSource }) => {
+			/* 动态 import 是异步的：期间可能已经 stop() 或重连，此时不能再启动 */
+			if (epoch !== this.#epoch) return;
 			const src = new MockSource((event) => {
 				const full = this.bus.publish(event);
 				this.store.append(full);
@@ -190,6 +214,24 @@ export class RoomSession {
 	}
 
 	#mockStop: (() => void) | null = null;
+
+	/**
+	 * 登录态变化后重连，使新身份生效。
+	 *
+	 * 必须断开重连而不能「就地换 Cookie」：登录态是在认证包（op=7）里
+	 * 一次性发出的，已经建立的连接无法中途改变身份。
+	 *
+	 * 未在运行（refs 为 0 或已停止）时只需等下次 acquire() 自然使用新值，
+	 * 不必主动连一次——那会在没人看直播时凭空产生一次 B 站连接。
+	 */
+	reloadAuth(): void {
+		if (!this.#running) return;
+		log.info(`房间 ${this.room} 登录态更新，重连以生效`);
+		this.stop();
+		/* stop() 会置 #stopped，这里重新起一次；refs 保持不变。
+		 * #start() 内部会递增代次，旧连接的收尾逻辑因此失效。 */
+		this.#start();
+	}
 
 	/** 停止采集并落盘。之后再次 acquire() 可以重新启动。 */
 	stop(): void {
@@ -217,6 +259,24 @@ export class RoomHub {
 
 	constructor(options: RoomHubOptions) {
 		this.#opt = options;
+	}
+
+	/**
+	 * 更新登录态并让正在运行的会话重连，使扫码结果**无需重启服务**即生效。
+	 *
+	 * 注意 `#opt` 是**按引用**传给每个 RoomSession 的（见构造函数），
+	 * 所以改这里的字段，所有会话（含之后新建的）都会看到新值。
+	 * 这不是巧合而是选择：登录态属于整个进程，不是某个房间的私有配置。
+	 * 换来的一点代价是——就地修改共享对象不够显式，故在此写明。
+	 */
+	reloadAuth(loginCookie: string): void {
+		this.#opt.loginCookie = loginCookie;
+		for (const session of this.#rooms.values()) session.reloadAuth();
+	}
+
+	/** 当前是否已配置登录态（不校验有效性，仅表示「有没有传进来」） */
+	get hasAuth(): boolean {
+		return Boolean(this.#opt.loginCookie?.trim());
 	}
 
 	/** 订阅一个房间，返回释放函数 */

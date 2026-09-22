@@ -44,6 +44,17 @@ export interface Config {
 	 * 生产建议用 `BILI_COOKIE_FILE` 指向一个不进版本库的文件。
 	 */
 	biliCookie: string;
+	/**
+	 * 网页端扫码登录的访问口令。
+	 *
+	 * 为什么必须要：二维码登录里，**持有 `qrcode_key` 的人就能领走凭据**
+	 * （轮询接口不校验任何身份，已实测）。若登录接口不设访问控制，
+	 * 任何人都能抢开挑战、或把自己的二维码诱导给操作者扫。
+	 * 这与 HTTPS 无关 —— 攻击者走的是你自己的合法接口。
+	 *
+	 * 留空表示**关闭网页登录**（默认）。此时仍可用 `npm run login` 扫码。
+	 */
+	loginToken: string;
 }
 
 const DEFAULTS: Config = {
@@ -59,7 +70,8 @@ const DEFAULTS: Config = {
 	idleMs: 60_000,
 	echoCount: 10,
 	logLevel: 'info',
-	biliCookie: ''
+	biliCookie: '',
+	loginToken: ''
 };
 
 /** config.json 的字段形状（宽松，全部可选） */
@@ -123,7 +135,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		idleMs: num(env.IDLE_MS ?? file.idleMs, DEFAULTS.idleMs),
 		echoCount: num(env.ECHO_COUNT ?? file.echoCount, DEFAULTS.echoCount),
 		logLevel: str(env.LOG_LEVEL ?? file.logLevel, DEFAULTS.logLevel) as Config['logLevel'],
-		biliCookie: resolveBiliCookie(env, file)
+		biliCookie: resolveBiliCookie(env, file),
+		/* 留空即关闭网页登录，不自动生成 —— 隐式开启的认证入口是安全上的坏味道 */
+		loginToken: str(env.LOGIN_TOKEN ?? file.loginToken, DEFAULTS.loginToken)
 	};
 
 	return cached;

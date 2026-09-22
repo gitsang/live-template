@@ -6,6 +6,7 @@
  * 「扫码成功了但服务还是匿名」这种极难排查的现象。
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { createLogger } from './logger';
 
@@ -51,6 +52,42 @@ export function readCookieFile(path: string): string {
 		log.warn(`读取 ${abs} 失败: ${(err as Error).message}`);
 		return '';
 	}
+}
+
+/**
+ * 请求令牌比较（恒定时间）。
+ *
+ * 用 `timingSafeEqual` 而不是 `===`：字符串比较会在第一个不同的字符处
+ * 提前返回，攻击者能通过响应耗时逐字节猜出令牌。这类攻击在实践中
+ * 未必好利用，但恒定时间比较的代价几乎为零，没有理由不用。
+ *
+ * 长度不同时直接返回 false —— `timingSafeEqual` 对不等长入参会抛错，
+ * 且长度本身不是秘密。
+ */
+export function safeEqual(a: string, b: string): boolean {
+	const bufA = Buffer.from(a, 'utf8');
+	const bufB = Buffer.from(b, 'utf8');
+	if (bufA.length !== bufB.length) return false;
+	if (bufA.length === 0) return false;
+	return timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * 生成一次性启动令牌。
+ *
+ * 用 `randomBytes` 而不是 `Math.random()`：后者是可预测的伪随机，
+ * 而这里生成的字符串就是访问登录接口的凭证。
+ * 去掉容易看错的字符（0/O、1/l/I），因为它要被人工从终端抄进网页。
+ */
+export function generateToken(bytes = 6): string {
+	const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+	const raw = randomBytes(bytes * 2);
+	let out = '';
+	for (let i = 0; i < bytes; i++) {
+		/* 取模会有极轻微的偏置，这里对「抄写用的一次性令牌」完全可接受 */
+		out += alphabet[raw[i]! % alphabet.length];
+	}
+	return out;
 }
 
 /** 文件是否为「仅所有者可读写」（用于安全提示，不阻断运行） */

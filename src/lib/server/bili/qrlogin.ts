@@ -35,7 +35,10 @@ export const QR_CODE = {
 	PENDING: 86101
 } as const;
 
-export type QrStatus = 'pending' | 'scanned' | 'success' | 'expired' | 'timeout' | 'unknown';
+import type { QrStatus } from '$lib/shared/types';
+
+/** 重新导出，使服务端调用方可以从本模块拿到该类型 */
+export type { QrStatus };
 
 /** 业务状态码 → 语义 */
 export function parseQrStatus(code: number | undefined): QrStatus {
