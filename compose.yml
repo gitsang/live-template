@@ -7,47 +7,37 @@ services:
     container_name: live-template
     restart: unless-stopped
     ports:
-      # 左侧是宿主机端口，可用 HOST_PORT 覆盖
       - '${HOST_PORT:-8080}:8080'
     environment:
-      # 必须固定时区：弹幕按天落盘依赖本地时间，容器默认 UTC 会把北京时间
-      # 08:00 之前的弹幕归到前一天。
+      # 固定时区：弹幕按天落盘依赖本地时间，UTC 会把北京时间 08:00 前的弹幕归到前一天。
       TZ: Asia/Shanghai
-      # 直播间号，支持短号（服务端自动解析）
+      # 支持短号，服务端自动解析
       ROOM_ID: '${ROOM_ID:-90932}'
-      # 造弹幕 + 造手柄输入；生产应保持 0
+      # 造弹幕 + 造手柄输入，生产保持 0
       MOCK: '${MOCK:-0}'
-      # 调试控制条，OBS 中应保持 0
+      # 调试控制条，OBS 中保持 0
       HUD: '${HUD:-0}'
       # 视频框透明洞，让 OBS 下方的显示器采集透出
       VIDEO_HOLE: '${VIDEO_HOLE:-1}'
       LOG_LEVEL: '${LOG_LEVEL:-info}'
-      # B 站登录态（可选）：留空为匿名，部分昵称会被打码。
-      # 优先用文件方式，环境变量会出现在 docker inspect 与日志采集里。
+      # B 站登录态（可选）：留空为匿名（昵称会被打码）。优先用文件，环境变量会进 docker inspect。
       BILI_COOKIE_FILE: '${BILI_COOKIE_FILE:-/run/secrets/bili-cookie.txt}'
       BILI_COOKIE: '${BILI_COOKIE:-}'
-      # 网页扫码登录的访问口令（可选）：留空则关闭网页登录，仍可用下方命令扫码。
-      # 不默认自动生成 —— 隐式开启的认证入口是坏味道。不设口令时同网段的人可以取走
-      # 你正在扫的那张二维码并抢走凭据（图即 qrcode_key，见 docs/design.md）。
-      # 开启方式：.env 里设 LOGIN_TOKEN=<随便一串>，再打开 /admin。
+      # 网页扫码登录的口令（可选），留空即关闭网页登录、仍可用文件末尾的命令扫码。
+      # 要设：图即 qrcode_key，不设口令时同网段的人能取走你正在扫的码并抢走凭据（见 docs/design.md）。
       LOGIN_TOKEN: '${LOGIN_TOKEN:-}'
     volumes:
-      # 弹幕归档持久化（重启后仍能回显）
       - ./data:/app/data
-      # 凭据挂载点，必须**可写**（网页扫码成功后要写回）。
-      # 不要重复挂载同一目标：曾经同时有可写 + :ro 两条，Docker 取最后一条，
-      # 实际生效的是只读，网页登录写入直接 EROFS。
-      # 容器以 uid 1000 运行，与常见宿主机用户一致，故不会有「归 root、宿主机读不了」。
+      # 必须**可写**（网页扫码成功后要写回）。别重复挂载同一目标：曾同时有可写 + :ro 两条，
+      # Docker 取最后一条使只读生效，写入直接 EROFS。
       - ./secrets:/run/secrets
-    # 若 OBS 在宿主机、服务在容器内，用 host 网络可避免额外的端口映射问题
+    # OBS 在宿主机时可用 host 网络，省掉端口映射
     # network_mode: host
 
-# 用 Docker 终端扫码（不用管理页、也不用装 Node）。需要 TTY，且服务已运行时
-# 加 --no-deps 避免把它一起重启：
+# 用 Docker 扫码（不用管理页、宿主机也不用装 Node）。需要 TTY，服务已运行时加 --no-deps：
 #
 #   docker compose run --rm --no-deps live-template \
 #     node build/danmaku/login.js --out /run/secrets/bili-cookie.txt
 #
-# 不另开一个 login 服务：那要把 ./secrets 再挂到另一个容器路径（/secrets），
-# 于是同一目录出现两个路径，任一边改了就会变成「扫码成功但仍匿名」。复用主服务只有一份定义。
+# 不另开 login 服务：那会把 ./secrets 再挂到第二个路径，两边不一致就成了「扫码成功但仍匿名」。
 
