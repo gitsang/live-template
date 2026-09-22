@@ -1260,6 +1260,27 @@ test('LoginSession 本地超时置为 expired 而非 timeout', async () => {
 	assert.equal(session.active, false, '过期后不应再有活动挑战');
 });
 
+test('LoginSession 轮询永不回传二维码图（图即凭据等价物）', async () => {
+	/*
+	 * 回归：轮询接口曾经支持 ?svg=1，但它没有调用方，且会把二维码重新发出去。
+	 * 二维码就是 qrcode_key 的图形编码，而持有 key 的人能在扫码成功后领走凭据
+	 * （已实测：可把下图解码还原出 key 并独立轮询），因此它是凭据等价物，
+	 * 不该被反复取回。状态变化时码本身不变，重传也毫无意义。
+	 */
+	let now = 1_000_000;
+	const { session } = makeSession({
+		now: () => now,
+		pollOnce: async () => ({ status: 'pending', cookie: '', redirectUrl: '', rawCode: 86101 })
+	});
+
+	await session.start();
+	for (let i = 0; i < 3; i++) {
+		now += 5_000;
+		const s = await session.poll();
+		assert.equal(s.svg, undefined, '轮询结果不得包含二维码图');
+	}
+});
+
 test('LoginSession 快照默认不带 SVG，显式请求才带', async () => {
 	/* 轮询是高频调用，每次都塞几十 KB 的 SVG 纯属浪费 */
 	const { session } = makeSession();

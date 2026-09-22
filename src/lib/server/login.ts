@@ -1,33 +1,37 @@
 /**
  * 网页端扫码登录的会话状态机。
  *
- * ## 为什么必须加访问口令
+ * ## 访问口令到底在防什么（以及**不**防什么）
  *
- * 二维码登录有一个容易被忽略的性质：**持有 `qrcode_key` 的人就能领走凭据**。
- * 轮询接口不校验任何身份（已实测：不带 cookie 也能轮询，返回 86101）。
- * 于是存在这样的攻击：
+ * 先说清楚一个常见误解：**口令防不住二维码钓鱼**。
+ * B 站的生成接口是公开的，任何人都能自己造一个码：
  *
- *   1. 攻击者打开你的登录页，服务端为他生成一个挑战 A
- *   2. 攻击者想让你去扫的却是**他自己**的码 —— 但他拿不到你的 A 的图？
- *      不，他能：他只要访问同一个接口，看到的就是服务端当前那个挑战。
+ *   GET https://passport.bilibili.com/x/passport-login/web/qrcode/generate
+ *   → 无需任何认证，直接返回 { url, qrcode_key }
  *
- * 也就是说，如果登录接口不设访问控制，任何人都能：
- *   - 抢占唯一的活动挑战（把操作者正在看的二维码换掉）
- *   - 从轮询响应里读出 `scanned` 状态，确认「有人扫了」
- *   - 而在成功那一刻，凭据会写到服务端文件 —— 这一步他偷不走。
+ * 攻击者完全可以绕开本服务造码并诱导你扫 —— 这是二维码登录固有的属性，
+ * 我们无法阻止。把「防钓鱼」写成口令的理由是错的。
  *
- * 但**真正的风险在反向**：攻击者可以自己开一个挑战，然后把那个二维码
- * 展示给操作者（钓鱼），操作者一扫，凭据就通过攻击者可控的挑战下发。
- * 所以关键不是「凭据会不会泄漏」，而是**不能允许未授权方开启挑战**。
+ * 口令真正防的是这两件事：
  *
- * 结论：登录接口必须有访问口令，且口令只在服务端日志里出现一次。
- * HTTPS 解决的是「传输途中被人截获」，与上面的问题完全无关 ——
- * 攻击者走的是你自己的合法接口，流量全程加密也没有用。
+ * 1. **二维码图等同于凭据**。轮询接口不校验任何身份（已实测：不带 cookie
+ *    也能轮询），因此**持有 `qrcode_key` 的人就能在扫码成功后领走 Cookie**。
+ *    而二维码就是 key 的图形编码 —— 已实测：把本服务下发的 SVG 解码回来
+ *    即可还原出 key，并可独立轮询。
+ *    所以「只暴露二维码」并不等于安全：它就是 key，只是换了种形式。
+ *    接口必须受保护，否则同网段任何人都能取走操作者正在扫的那张图。
+ *
+ * 2. **抢占唯一的活动挑战**。本类只保留一个挑战，无保护的接口意味着
+ *    别人可以把操作者正在看的码换掉。
+ *
+ * 注意部署语义：compose 默认把端口发布到 `0.0.0.0`，因此登录接口
+ * 默认是**局域网可达**的。这正是需要口令的场景。若你只在 localhost 上用，
+ * 口令的边际价值不大（但仍不应默认开启一个无保护的认证入口）。
  *
  * ## 并发
  *
- * 只保留一个活动挑战：同时存在多个既无使用场景，又会让
- * 「网页上显示的是哪个码」变得含糊，反而制造钓鱼空间。
+ * 只保留一个活动挑战：同时存在多个既没有使用场景，又会让
+ * 「网页上显示的是哪个码」变得含糊。
  */
 import {
 	QR_STATUS_TEXT,
@@ -152,12 +156,16 @@ export class LoginSession {
 	/**
 	 * 推进一次轮询并返回最新状态。
 	 *
+	 * **不返回二维码图**：扫码状态变化时码本身并不变，每次回传几十 KB 是纯浪费；
+	 * 更重要的是**图本身就等同于凭据**（见文件头注释），没有任何理由让它被反复取回。
+	 * 需要重新展示时就重新开起挑战（`start()`），而不是重发旧码。
+	 *
 	 * 轮询节流在这里做：距离上次不足 `MIN_POLL_INTERVAL_MS` 就直接回快照，
 	 * 不打扰 B 站。
 	 */
-	async poll(withSvg = false): Promise<LoginStatus> {
+	async poll(): Promise<LoginStatus> {
 		const challenge = this.#challenge;
-		if (!challenge || this.#settled) return this.#snapshot(withSvg);
+		if (!challenge || this.#settled) return this.#snapshot(false);
 
 		const now = this.#now();
 
@@ -166,10 +174,10 @@ export class LoginSession {
 			this.#status = 'expired';
 			this.#settled = true;
 			log.info('二维码已过期（本地超时）');
-			return this.#snapshot(withSvg);
+			return this.#snapshot(false);
 		}
 
-		if (now - this.#lastPollAt < MIN_POLL_INTERVAL_MS) return this.#snapshot(withSvg);
+		if (now - this.#lastPollAt < MIN_POLL_INTERVAL_MS) return this.#snapshot(false);
 		this.#lastPollAt = now;
 
 		try {
@@ -179,12 +187,12 @@ export class LoginSession {
 			if (result.status === 'expired') {
 				this.#settled = true;
 				log.info('二维码已过期');
-				return this.#snapshot(withSvg);
+				return this.#snapshot(false);
 			}
 
 			if (result.status === 'scanned') {
 				log.info('已扫码，等待手机确认');
-				return this.#snapshot(withSvg);
+				return this.#snapshot(false);
 			}
 
 			if (result.status === 'success') {
@@ -202,7 +210,7 @@ export class LoginSession {
 					this.#status = 'unknown';
 					this.#error = '登录成功但未获取到凭据（SESSDATA 缺失），请重试';
 					log.warn(this.#error);
-					return this.#snapshot(withSvg);
+					return this.#snapshot(false);
 				}
 
 				try {
@@ -213,10 +221,10 @@ export class LoginSession {
 					this.#error = `凭据保存失败：${(err as Error).message}`;
 					log.error(this.#error);
 				}
-				return this.#snapshot(withSvg);
+				return this.#snapshot(false);
 			}
 
-			return this.#snapshot(withSvg);
+			return this.#snapshot(false);
 		} catch (err) {
 			/*
 			 * 网络抖动不该终结整个流程：保留状态，等下一次轮询重试。
@@ -226,7 +234,7 @@ export class LoginSession {
 			const message = (err as Error).message;
 			log.warn(`轮询失败（将重试）: ${message}`);
 			this.#error = message;
-			return this.#snapshot(withSvg);
+			return this.#snapshot(false);
 		}
 	}
 }
