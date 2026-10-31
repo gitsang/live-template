@@ -848,6 +848,13 @@ html.guide-on .slot {
 	border: 1px solid rgba(255, 255, 255, 0.09);
 }
 
+.pad-bumper.on {
+	color: #12141d;
+	background: var(--accent);
+	border-color: var(--accent);
+	box-shadow: 0 0 8px -2px var(--accent);
+}
+
 .pad-trigger {
 	flex: 1 1 auto;
 	min-width: 0;
