@@ -98,6 +98,8 @@ function stateAt(t: number): PadState {
 
 /** 假手柄读取器 */
 export class PadMockReader implements PadReader {
+	readonly kind = 'mock' as const;
+
 	start(onChange: PadListener): () => void {
 		const t0 = performance.now();
 		let raf = 0;
@@ -109,7 +111,7 @@ export class PadMockReader implements PadReader {
 			/* 脚本按帧变化，直接比较轴值即可，JSON 比较足够廉价 */
 			if (JSON.stringify(next) !== JSON.stringify(last)) {
 				last = next;
-				onChange(next);
+				onChange(next, 'mock');
 			}
 			raf = requestAnimationFrame(tick);
 		};

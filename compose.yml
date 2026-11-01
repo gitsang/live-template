@@ -26,6 +26,8 @@ services:
       # 网页扫码登录的口令（可选），留空即关闭网页登录、仍可用文件末尾的命令扫码。
       # 要设：图即 qrcode_key，不设口令时同网段的人能取走你正在扫的码并抢走凭据（见 docs/design.md）。
       LOGIN_TOKEN: '${LOGIN_TOKEN:-}'
+      # 手柄采集端上报口令（可选），留空即关闭上报。采集端在 OBS 那台机器上跑，见 pad-client/。
+      PAD_TOKEN: '${PAD_TOKEN:-}'
     volumes:
       - ./data:/app/data
       # 必须**可写**（网页扫码成功后要写回）。别重复挂载同一目标：曾同时有可写 + :ro 两条，

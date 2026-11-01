@@ -2,14 +2,14 @@
 	/**
 	 * 手柄操作框。
 	 *
-	 * 读取：rAF 持续轮询 navigator.getGamepads()，不依赖 gamepadconnected 事件
-	 *       （Chromium 只在收到一次按键后才把设备暴露给页面）。
+	 * 读取：优先用 Windows 采集端经 /ws/pad 上报的帧，静默则回落本页 Gamepad API
+	 *       （见 $lib/client/remote-pad.ts）。两条来源都最终落到同一个 PadState。
 	 * 渲染：全量键位，只显示当前按下，松开即熄灭，无历史序列。
 	 * 状态：无手柄或全部松开时整框 opacity 0.55；无设备时显示呼吸提示。
 	 */
 	import Panel from './Panel.svelte';
-	import { GamepadReader } from '$lib/client/gamepad';
-	import { PadMockReader } from '$lib/client/pad-mock';
+	import type { PadSource } from '$lib/client/gamepad';
+	import { createPadReader } from '$lib/client/remote-pad';
 	import { stickTransform, type PadState } from '$lib/shared/pad';
 
 	interface Props {
@@ -33,19 +33,22 @@
 		pressed: false
 	};
 
-	let state: PadState = $state(EMPTY);
+	let pad: PadState = $state(EMPTY);
+	/** 当前数据来源，只影响提示文案与参考线模式下的标注 */
+	let source = $state<PadSource>('local');
 
 	$effect(() => {
-		const reader = mock ? new PadMockReader() : new GamepadReader();
-		const stop = reader.start((s) => {
-			state = s;
+		const useMock = mock;
+		const reader = createPadReader({ mock: useMock });
+		return reader.start((s, src) => {
+			pad = s;
+			source = src;
 		});
-		return stop;
 	});
 
 	/* ---- 取值助手 ---- */
-	const b = (n: string): boolean => state.buttons[n]?.pressed ?? false;
-	const v = (n: string): number => state.buttons[n]?.value ?? 0;
+	const b = (n: string): boolean => pad.buttons[n]?.pressed ?? false;
+	const v = (n: string): number => pad.buttons[n]?.value ?? 0;
 
 	/** 扳机进度条：0 → 1 */
 	function trig(name: string): { pct: string; num: string } {
@@ -56,19 +59,23 @@
 	/* 摇杆圆点位移按像素计算，具体原因见 shared/pad.ts 的 STICK_MAX_TRAVEL */
 	const stick = stickTransform;
 
-	const [lx, ly, rx, ry] = $derived(state.axes);
+	const [lx, ly, rx, ry] = $derived(pad.axes);
 	const lMag = $derived(Math.hypot(lx, ly));
 	const rMag = $derived(Math.hypot(rx, ry));
 </script>
 
 <Panel variant="pad" accent="--mg" sprite="pad" en="GAMEPAD" cn="手柄操作框" {guides} {fill}>
 	{#snippet dim()}
-		{state.connected ? (state.pressed ? '● 输入中' : '○ 待机') : ''}{dimText
-			? (state.connected ? ' · ' : '') + dimText
+		{guides && source === 'remote' ? 'REMOTE · ' : ''}{pad.connected
+			? pad.pressed
+				? '● 输入中'
+				: '○ 待机'
+			: ''}{dimText
+			? (pad.connected ? ' · ' : '') + dimText
 			: ''}
 	{/snippet}
 
-	<div class="pad-body" class:idle={!state.connected || !state.pressed}>
+	<div class="pad-body" class:idle={!pad.connected || !pad.pressed}>
 		<!-- 键位底图水印（沿用模板） -->
 		<svg
 			class="padhint"
@@ -147,11 +154,13 @@
 			</div>
 		</div>
 
-		{#if !state.connected}
+		{#if !pad.connected}
 			<div class="pad-hint">
-				按任意键唤醒手柄
+				{source === 'remote' ? '采集端在线，未检测到手柄' : '按任意键唤醒手柄'}
 				<br />
-				<span style="font-size:10px;letter-spacing:1px">PRESS ANY BUTTON</span>
+				<span style="font-size:10px;letter-spacing:1px">
+					{source === 'remote' ? 'NO CONTROLLER ON CLIENT' : 'PRESS ANY BUTTON'}
+				</span>
 			</div>
 		{/if}
 	</div>

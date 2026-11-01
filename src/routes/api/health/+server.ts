@@ -5,15 +5,20 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { loadConfig, toViewOptions } from '$lib/server/config';
-import { getHub, getStartTime } from '$lib/server/registry';
+import { getHub, getPadHub, getStartTime } from '$lib/server/registry';
 
 interface HubLike {
 	snapshot(): unknown[];
 }
 
+interface PadHubLike {
+	snapshot(): Array<{ slot: string; connected: boolean; id: string; at: number; seq: number }>;
+}
+
 export const GET: RequestHandler = () => {
 	const config = loadConfig();
 	const hub = getHub<HubLike>();
+	const padHub = getPadHub<PadHubLike>();
 	const now = Date.now();
 
 	return json({
@@ -30,6 +35,9 @@ export const GET: RequestHandler = () => {
 		rooms: hub ? hub.snapshot() : [],
 		/* hub 不可见时明确说明，避免误读成「没有房间」 */
 		hubAvailable: hub !== undefined,
+		/* 手柄：谁在线、最后一帧是多久以前 —— 排查「手柄框不动」的第一步看这里 */
+		pads: padHub ? padHub.snapshot() : [],
+		padAvailable: padHub !== undefined,
 		/* OBS 对齐用的精确尺寸 */
 		geo: {
 			video: '1360x765',

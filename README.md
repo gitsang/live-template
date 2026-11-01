@@ -97,6 +97,31 @@ npm run check                     # TypeScript + Svelte 类型检查
 - 如果手柄框没反应，先打开 `http://<host>:8080/debug/pad` 用普通浏览器排查：
   能亮 → 问题在 OBS；不亮 → 问题在手柄/驱动/系统。
 
+#### 远程采集端（OBS 在后台也能用）
+
+上面那条路是「浏览器自己读」。它有两个绕不过去的限制：
+
+1. Chromium 只对**拥有焦点**的窗口读手柄；
+2. 浏览器源不可见时（切场景、被遮挡、勾了「不可见时关闭源」）页面 rAF 会被节流 ——
+   读到了也不会重绘。
+
+OBS ≥ 31.0.2 只修掉了第 1 条里 Windows.Gaming.Input 那一部分。要彻底摆脱这两条，就在
+**跑 OBS 的那台机器**上跑一个采集端：它从进程内读手柄，经 WebSocket 推给服务端，页面订阅。
+与 OBS 是否在前台、是否在渲染完全无关。
+
+```bash
+cd pad-client
+npm install
+npm start -- --server http://192.168.1.10:8080 --token 你的PAD_TOKEN
+```
+
+服务端需先设 `PAD_TOKEN`（留空 = 关闭上报）。细节与开机自启见 [`pad-client/README.md`](pad-client/README.md)。
+
+优先级是 **采集端 > 本页 Gamepad API**：采集端静默超过 2 秒就自动回落本地，所以没装采集端
+的用法和以前一模一样。`/debug/pad` 的「来源」一行会直接显示当前用的是哪一种。
+
+> 多手柄：服务端按 `slot` 分开存状态，采集端用 `--slot p2` 起第二份即可；页面目前只渲染 `p1`。
+
 #### 为什么需要 OBS ≥ 31.0.2
 
 Chromium 117 起在 Windows 上改用 `Windows.Gaming.Input` 读取手柄，而该 API
@@ -115,6 +140,9 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
 | ≤ 30.x          | ✅                 |
 | 31.0.0 / 31.0.1 | ❌ 必须 OBS 在前台 |
 | **≥ 31.0.2**    | ✅ **无需焦点**    |
+
+> 即便升到 31.0.2，「源不可见 → rAF 被节流」这一层仍然存在（读到数据也不会重绘）。
+> 要与 OBS 的焦点和渲染彻底解耦，用上面的[远程采集端](#远程采集端obs-在后台也能用)。
 
 ---
 
@@ -156,6 +184,8 @@ OBS 官方已在 [obs-browser PR #471](https://github.com/obsproject/obs-browser
 | `echoCount` | `ECHO_COUNT` | `10`      | 新页面回显条数            |
 | `logLevel`  | `LOG_LEVEL`  | `info`    | debug/info/warn/error     |
 | `biliCookie` | `BILI_COOKIE` / `BILI_COOKIE_FILE` | 空 | 见下方「登录态」 |
+| `loginToken` | `LOGIN_TOKEN` | 空 | 网页扫码登录口令，留空即关闭 |
+| `padToken`  | `PAD_TOKEN`  | 空       | 手柄采集端上报口令，**留空即关闭上报** |
 
 ---
 
@@ -348,6 +378,7 @@ Cookie 从浏览器开发者工具里复制（需含 `DedeUserID` 字段）。
 | `GET /api/health`     | 运行状态：房间、连接状态、配置、对齐尺寸        |
 | `GET /api/self-test`  | 注入 3 条测试弹幕，验证「WS → 渲染」链路        |
 | `WS /ws?room=&since=` | 弹幕推送（`hello` → `status`/`danmaku`/`ping`） |
+| `WS /ws/pad?slot=&role=&token=` | 手柄帧：`role=pub` 采集端上行（需 `PAD_TOKEN`），缺省为页面只读订阅 |
 | `GET /admin`          | 管理页：扫码登录 B 站（需 `LOGIN_TOKEN`，见上） |
 | `POST /api/admin/login`  | 用口令换取管理会话 Cookie（HttpOnly）        |
 | `POST /api/admin/logout` | 清除管理会话                                 |
@@ -368,21 +399,27 @@ curl -s localhost:8080/api/self-test     # 能看到测试弹幕 → 渲染链�
 
 ```
 ├─ docs/design.md              设计与决策记录（含手柄问题的完整溯源）
+├─ pad-client/                 Windows 手柄采集端（SDL3 → /ws/pad，见 §21）
+│  ├─ src/sdl.ts               设备枚举、插拔重开、SDL 语义名 → PadState
+│  ├─ src/reporter.ts          上报通道（断线退避重连、丢帧即丢）
+│  └─ src/main.ts              命令行入口与 60Hz 采样循环
 ├─ scripts/danmaku.py          参考实现（Python，不参与运行）
 ├─ statics/basic-framework.html  原始框体模板（视觉基准）
 ├─ src/
 │  ├─ lib/
 │  │  ├─ styles/theme.css      像素风样式（自模板抽出）
 │  │  ├─ components/           Scene / Panel / Sprite / ChatBox / PadBox / …
-│  │  ├─ client/               ws / gamepad / mock / feed
+│  │  ├─ client/               ws / gamepad / remote-pad / mock / feed
 │  │  ├─ server/               config / logger / hub / store / eventbus / ws-server
 │  │  │  ├─ bili/              api / packet / client / qrlogin（B 站采集与扫码）
+│  │  │  ├─ pad-hub.ts         手柄状态中枢（最新帧 + 看门狗）
+│  │  │  ├─ pad-ws.ts          /ws/pad：采集端上行 + 页面订阅
 │  │  │  ├─ admin-session.ts   管理会话签名（HMAC，无状态）
 │  │  │  ├─ login.ts           扫码登录状态机
 │  │  │  └─ credential.ts      凭据落盘（权限 600）
 │  │  └─ shared/               types / geometry / pad / chat / view / qr
 │  └─ routes/                  +page / only/[box] / debug/pad / admin / api/*
-├─ server.mjs                  生产入口（HTTP + /ws）
+├─ server.mjs                  生产入口（HTTP + /ws + /ws/pad）
 ├─ Containerfile / compose.yml
 └─ tests/unit.test.ts          单测（无测试框架）
 ```
@@ -398,6 +435,7 @@ curl -s localhost:8080/api/self-test     # 能看到测试弹幕 → 渲染链�
 - 聊天框渲染：**弹幕 / 礼物 / 醒目留言（SC）** 三类，像素风皮肤
 - 用户名着色、粉丝牌、UL 等级、舰长徽章（房管 / 大会员标记）
 - 手柄全量键位显示（ABXY / 十字键 / 肩键 / 扳机模拟量 / 双摇杆 / View-Menu-Guide）
+- 手柄远程采集端（Windows 客户端 + `/ws/pad`）：OBS 在后台/切场景时手柄框照常响应
 - 视频透明洞、单框页、健康检查与自检、mock 模式、容器部署
 
 **未实现（考虑后续）**：上舰播报、进房欢迎、点赞、头像、公告框内容、

@@ -7,10 +7,12 @@
  */
 
 const HUB_KEY = Symbol.for('live-template.hub');
+const PAD_HUB_KEY = Symbol.for('live-template.padHub');
 const START_KEY = Symbol.for('live-template.startTime');
 
 type GlobalWithRegistry = typeof globalThis & {
 	[HUB_KEY]?: unknown;
+	[PAD_HUB_KEY]?: unknown;
 	[START_KEY]?: number;
 };
 
@@ -25,6 +27,16 @@ export function registerHub(instance: unknown): void {
 /** 取得的 hub（类型由调用方断言；未注册时为 undefined） */
 export function getHub<T>(): T | undefined {
 	return g[HUB_KEY] as T | undefined;
+}
+
+/** 入口注册手柄中枢（同样是为了跨两次打包共享实例） */
+export function registerPadHub(instance: unknown): void {
+	g[PAD_HUB_KEY] = instance;
+}
+
+/** 取得的手柄中枢（未注册时为 undefined，例如纯 dev 模式） */
+export function getPadHub<T>(): T | undefined {
+	return g[PAD_HUB_KEY] as T | undefined;
 }
 
 /** 进程启动时刻 */

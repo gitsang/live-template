@@ -105,7 +105,103 @@ export function applyDeadzone(v: number, dz = DEADZONE): number {
 	return sign * ((Math.abs(v) - dz) / (1 - dz));
 }
 
+/** 判断两份状态是否等价（用于跳过无变化的帧） */
+export function sameState(a: PadState, b: PadState): boolean {
+	if (a.connected !== b.connected || a.pressed !== b.pressed) return false;
+	for (let i = 0; i < 4; i++) {
+		if (a.axes[i] !== b.axes[i]) return false;
+	}
+	for (const name of STANDARD_BUTTONS) {
+		const x = a.buttons[name];
+		const y = b.buttons[name];
+		if (!x || !y) return false;
+		if (x.pressed !== y.pressed || x.value !== y.value) return false;
+	}
+	return true;
+}
+
 /** 量化到 1/255 步进，避免浮点抖动导致每帧都被判定为「变化」 */
 export function quantize(v: number): number {
 	return Math.round(v * 255) / 255;
+}
+
+/* ============================ 远程上报（采集端 → 服务端 → 页面） ============================ */
+
+/**
+ * 判定「采集端已失联」的静默窗口。
+ *
+ * 采集端每 16ms 采一次、每秒至少发一包心跳，因此 2s 足够区分「手柄真没连」与
+ * 「机器卡了一下」。服务端的看门狗与页面的回落逻辑共用同一个值 —— 两边不一致会
+ * 出现「服务端已判死、页面还在用旧帧」的错位。
+ */
+export const PAD_STALE_MS = 2000;
+
+/** 采集端采样周期（60Hz，与页面 rAF 一致；再快也只是白烧 CPU） */
+export const PAD_SAMPLE_MS = 16;
+
+/** slot 名（玩家位）。显式绑定，不依赖设备枚举顺序 —— 蓝牙/XInput 混用时顺序会变。 */
+export const PAD_SLOT_PATTERN = /^[a-z0-9_-]{1,16}$/i;
+
+/** 单包上限：满量程按键表约 1KB，8KB 留足余量又拦得住垃圾包 */
+export const PAD_MAX_PAYLOAD = 8 * 1024;
+
+/** 采集端上行速率上限（包/秒）。60Hz 上报 + 心跳远低于此，超出的直接丢。 */
+export const PAD_MAX_RATE = 240;
+
+function clamp(v: number, lo: number, hi: number): number {
+	if (!Number.isFinite(v)) return 0;
+	return v < lo ? lo : v > hi ? hi : v;
+}
+
+function num(v: unknown, fallback = 0): number {
+	return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+/**
+ * 把来路不明的 JSON 洗成合法的 PadState。
+ *
+ * `/ws/pad` 的上行是**外部进程**喂进来的数据，不能假设形状正确：非数组、超长字符串、
+ * 上亿的按键表都会直接打进页面渲染，一条野包就能让 OBS 源花屏或卡死。
+ * 因此按键名只认 STANDARD_BUTTONS、数值一律 clamp、字符串一律截断，形状不对直接返回 null。
+ *
+ * 输出总是填满全部标准按键（缺省 0），与 `snapshot()` 的形状保持一致 ——
+ * `sameState()` 依赖两边键集合相同，否则每帧都会被判成「有变化」。
+ */
+export function sanitizePadState(raw: unknown): PadState | null {
+	if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+	const src = raw as Record<string, unknown>;
+
+	const rawButtons =
+		src.buttons != null && typeof src.buttons === 'object' && !Array.isArray(src.buttons)
+			? (src.buttons as Record<string, unknown>)
+			: {};
+
+	const buttons: PadState['buttons'] = {};
+	let pressed = false;
+	for (const name of STANDARD_BUTTONS) {
+		const item = rawButtons[name];
+		const obj = item != null && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+		const value = quantize(clamp(num(obj.value), 0, 1));
+		const on = obj.pressed === true || value > 0;
+		buttons[name] = { pressed: on, value };
+		if (on) pressed = true;
+	}
+
+	const rawAxes = Array.isArray(src.axes) ? src.axes : [];
+	const axes: PadState['axes'] = [
+		quantize(clamp(num(rawAxes[AXES.LX]), -1, 1)),
+		quantize(clamp(num(rawAxes[AXES.LY]), -1, 1)),
+		quantize(clamp(num(rawAxes[AXES.RX]), -1, 1)),
+		quantize(clamp(num(rawAxes[AXES.RY]), -1, 1))
+	];
+	if (axes.some((a) => a !== 0)) pressed = true;
+
+	return {
+		connected: src.connected === true,
+		id: typeof src.id === 'string' ? src.id.slice(0, 64) : '',
+		mapping: src.mapping === 'standard' ? 'standard' : '',
+		buttons,
+		axes,
+		pressed
+	};
 }

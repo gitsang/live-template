@@ -49,6 +49,13 @@ export interface Config {
 	 * 口令**防不住**二维码钓鱼 —— B 站生成接口是公开的，谁都能自己造码。
 	 */
 	loginToken: string;
+	/**
+	 * 手柄采集端上门报到 `/ws/pad` 用的口令。留空 = **关闭上报**（页面仍可只读订阅）。
+	 *
+	 * 为什么必须显式开：这个口子能直接驱动直播画面上的手柄框，等于一小块画面的写权限，
+	 * 而 compose 默认发布到 0.0.0.0。默认关闭、要用才开，比默认开放再提醒安全得多。
+	 */
+	padToken: string;
 }
 
 const DEFAULTS: Config = {
@@ -65,7 +72,8 @@ const DEFAULTS: Config = {
 	echoCount: 10,
 	logLevel: 'info',
 	biliCookie: '',
-	loginToken: ''
+	loginToken: '',
+	padToken: ''
 };
 
 /** config.json 的字段形状（宽松，全部可选） */
@@ -131,7 +139,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		logLevel: str(env.LOG_LEVEL ?? file.logLevel, DEFAULTS.logLevel) as Config['logLevel'],
 		biliCookie: resolveBiliCookie(env, file),
 		/* 留空即关闭网页登录，不自动生成 —— 隐式开启的认证入口是安全上的坏味道 */
-		loginToken: str(env.LOGIN_TOKEN ?? file.loginToken, DEFAULTS.loginToken)
+		loginToken: str(env.LOGIN_TOKEN ?? file.loginToken, DEFAULTS.loginToken),
+		/* 同理：手柄上报默认关闭，不自动生成口令（采集端要与服务端共用同一个值） */
+		padToken: str(env.PAD_TOKEN ?? file.padToken, DEFAULTS.padToken)
 	};
 
 	return cached;
