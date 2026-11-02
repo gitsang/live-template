@@ -941,3 +941,136 @@ GET /x/passport-login/web/qrcode/poll?qrcode_key=<key>
 而不是随机阈值 —— 纯随机会让「验证某种渲染」变成碰运气。
 
 ---
+## 21. 远程手柄：采集端 + `/ws/pad`
+
+> 状态：**已实现**。目标是把「手柄能不能用」从「OBS 有没有焦点」这件事上解绑。
+
+### 21.1 为什么 §2 的结论不够
+
+§2 的结论是「浏览器源内可用，但需要 OBS ≥ 31.0.2」。那条结论没错，但它只覆盖了三层原因里的一层：
+
+| 层 | 机制 | OBS 31.0.2 是否解决 |
+| --- | --- | --- |
+| ① Chromium | Gamepad 只对**聚焦的** frame 轮询 | 部分（仅 WGI 那条路径） |
+| ② Windows / WGI | WGI 要求窗口有焦点才返回输入 | ✅ 通过禁用 `EnableWindowsGamingInputDataFetcher` |
+| ③ CEF 渲染 | 源不可见 / 切场景 / 最小化时 rAF 被节流或暂停 | ❌ 管不到 |
+
+第 ③ 层是致命的：直播时切到别的场景、或把 OBS 最小化，浏览器源就不再重绘 ——
+即使第 ① ② 层都通了，画面上的手柄框也会停在最后一帧。
+
+### 21.2 为什么不选别的方案
+
+| 方案 | 为什么不用 |
+| --- | --- |
+| `Windows.Gaming.Input` | 要求焦点，正是根因本身 |
+| vJoy / ViGEmBus / DS4Windows | 只做「设备重映射」，虚拟手柄最终还是**浏览器去读**，①②③ 原样保留 |
+| 伪造焦点 / `Interact` 刷新 / 注入脚本抢焦点 | 与 OBS 版本强耦合，一次升级就失效；且 OBS 常常确实不在前台 |
+| 给 OBS 塞 CEF 启动开关 | 不受支持、不保证透传，不投入 |
+
+结论：把**读取**搬到进程外。进程内的 XInput / HIDAPI / RawInput 都不要求焦点，
+读到的数据经 WS 推给服务端，页面订阅 —— 与 OBS 是否在前台、是否在渲染无关。
+
+### 21.3 拓扑
+
+```
+┌──────────────────────────┐        ┌────────────────────────────┐
+│ Windows 采集端（pad-client）│  ws    │ Node 服务 :8080             │
+│  SDL3 → PadState          │ ─────► │ /ws/pad?role=pub&token=…    │
+│  只发变化 + 1Hz 心跳       │        │   PadHub：最新帧 + 2s 看门狗 │
+│  断线指数退避重连          │        │ /ws/pad?slot=p1（页面订阅）  │
+└──────────────────────────┘        └──────────────┬─────────────┘
+                                                   │ {t:'pad',…}
+                                                   ▼
+                                     ┌────────────────────────────┐
+                                     │ OBS 浏览器源 / 普通浏览器     │
+                                     │ RemotePadReader → PadBox    │
+                                     │ 静默 2s 回落本页 Gamepad API │
+                                     └────────────────────────────┘
+```
+
+### 21.4 协议
+
+一条路径、两种角色，由 query 区分：
+
+| 连接 | 角色 | 行为 |
+| --- | --- | --- |
+| `/ws/pad?role=pub&token=…&slot=p1` | 采集端 | 只上行；口令不对或被关闭则 1008 关闭 |
+| `/ws/pad?slot=p1` | 页面 | 接入时先收各 slot 的最新帧，之后跟随广播 |
+
+帧格式（上下行同一形状，页面拿到 `state` 直接当 `PadState` 用）：
+
+```json
+{ "t": "pad", "slot": "p1", "seq": 1234, "ts": 1762000000000,
+  "state": { "connected": true, "id": "Xbox Wireless Controller",
+             "mapping": "standard",
+             "buttons": { "A": { "pressed": true, "value": 1 } },
+             "axes": [0.32, 0, 0, 0], "pressed": true } }
+```
+
+三条与弹幕**故意不同**的设计：
+
+1. **不做补发**。手柄是「现在按着什么」的可覆盖实时量，补发一串过期帧只会让画面错乱；
+   弹幕是事件流，漏一条就真丢了，所以那边才有水位线。
+2. **服务端做看门狗**（2s）。采集端崩溃时 TCP 可能半开，不主动判死就会永远停在
+   「A 键按住」。判死帧保留 `id`，方便看出是哪只手柄掉的。
+3. **只发变化 + 1Hz 心跳**。稳态下几乎零流量；心跳只为喂看门狗。
+
+### 21.5 安全与鲁棒性
+
+`/ws/pad` 的上行来自**外部进程**，不能假设数据形状正确，因此：
+
+- **默认关闭**：`PAD_TOKEN` 留空时上报直接拒绝并打日志，而不是「默认谁都能推」。
+  与 `LOGIN_TOKEN` 同一取法 —— 隐式开启的写入口是安全上的坏味道。
+- **常量时间比较**：复用 `credential.ts` 的 `safeEqual`，长度不等直接 false。
+- **洗数据**：`sanitizePadState()` 按键名只认 `STANDARD_BUTTONS`、数值 clamp 到量程、
+  字符串截断 64、形状不对返回 null。一条野包不能直接打进渲染层。
+- **限流**：`maxPayload` 8KB + 每连接 240 包/秒的令牌桶，超出的丢；
+  只在「开始丢」和「恢复」时各打一条日志，避免被刷屏。
+- **slot 上限 8**：防呆，正常只有 1–2 个。
+
+### 21.6 采集端（`pad-client/`）
+
+- **SDL3 `GameController`** 而不是 `Joystick`：Joystick 给原始按键下标，每只手柄都不同；
+  Controller 直接给 `buttons.a` / `axes.leftTrigger` 这类语义名，Xbox / DS4 / DS5 /
+  Switch Pro 走同一套代码，也不用维护映射表。
+- **`SDL_JOYSTICK_WGI=0`**：在加载原生库前设置，关掉 SDL 自己的 WGI 后端 ——
+  与 obs-browser PR #471 在 OBS 31.0.2 里的修法是同一招。
+- **60Hz 采样、按帧比对**，不用事件流：页面本来就按帧渲染，采样天然把「一帧内多次变化」
+  压成一次上报，也让「丢帧」变得无害。
+- **插拔**：每 1s 重扫一次设备表（不做事件驱动），掉线即关实例、下次扫描重开。
+- **归一化与页面共用**同一份 `shared/pad.ts`（死区、量化、`sameState`），
+  两端形状不一致会直接导致「每帧都被判成有变化」。
+
+### 21.7 前端回落
+
+`PadReader` 接口没变（`start(onChange)`），新增的 `RemotePadReader` 与原有的
+`GamepadReader` 可以完全互换；`PreferredPadReader` 把两者组合：
+
+- 收到 `connected:true` 的远程帧 → 用远程，`source = 'remote'`；
+- 远程静默超过 `PAD_STALE_MS`(2s) → 回落本地 `GamepadReader`，`source = 'local'`；
+- 两者都没有 → `connected:false`，提示文案按来源区分。
+
+因此**没装采集端的用法和以前一模一样**，装了就自动优先用采集端。
+`PadBox` 的渲染代码零改动（唯一的重命名是把内部变量 `state` 改成 `pad`：
+`svelte2tsx` 下 `let state` 会让 `$state` 被当成 store 语法，同类问题 `debug/pad` 里早有记录）。
+
+### 21.8 已知限制
+
+- **页面只渲染 `p1`**：服务端与采集端都已按 `slot` 分槽，多玩家只差页面侧选择；
+  需要时采集端 `--slot p2` 起第二份即可。
+- **Guide/Home 键取决于后端**：SDL 能拿到 `buttons.guide`，但 XInput 后端本身没有这一位。
+  与历史行为一致，UI 保留位置但不承诺点亮。
+- **DS4/DS5**：SDL3 自带 HIDAPI 的 PS4/PS5 驱动，通常不需要 DS4Windows；
+  若某只手柄只以 DirectInput 方式暴露，则不会被识别 —— 先用 `npm run list` 确认。
+- **不是零依赖**：`@kmamal/sdl` 的安装阶段要下载预编译的 `dist/sdl.node` / `SDL2.dll`，
+  网络不通时会缺文件（见 `pad-client/README.md` 的排查段）。
+
+### 21.9 验收
+
+- 单测覆盖：`sanitizePadState`（拒绝非对象 / clamp / 补全按键 / 丢野键）、
+  `readState`（语义名映射 / 扳机阈值 / 死区）、`PadHub` 看门狗判死、
+  `/ws/pad` 口令拒绝与订阅广播、`RemotePadReader` 的 remote→静默回落。
+- 本机实测：headless 进程读到 Xbox 360 手柄的实时轴值 —— 证明「不依赖焦点」这个前提成立；
+  `curl /api/health` 的 `pads` 里能看到 slot、设备名与最后一次收包时刻。
+
+---

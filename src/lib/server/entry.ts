@@ -7,8 +7,10 @@ import { resolve } from 'node:path';
 
 export { RoomHub } from './hub';
 export { attachDanmakuWs, DanmakuWsServer } from './ws-server';
+export { PadHub } from './pad-hub';
+export { attachPadWs, PadWsServer } from './pad-ws';
 export { loadConfig, toViewOptions } from './config';
-export { registerHub, getHub, getStartTime } from './registry';
+export { registerHub, getHub, registerPadHub, getPadHub, getStartTime } from './registry';
 export { setLogLevel } from './logger';
 export { localDateKey } from './store';
 

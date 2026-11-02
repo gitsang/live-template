@@ -1,0 +1,23 @@
+{
+	"name": "live-template-pad-client",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "live-template 手柄采集端：读本机手柄，经 /ws/pad 上报给服务端",
+	"scripts": {
+		"start": "tsx src/main.ts",
+		"dev": "tsx src/main.ts --verbose",
+		"list": "tsx src/main.ts --list",
+		"check": "tsc -p tsconfig.json"
+	},
+	"dependencies": {
+		"@kmamal/sdl": "^0.11.13",
+		"ws": "^8.18.3"
+	},
+	"devDependencies": {
+		"@types/node": "^24.0.0",
+		"@types/ws": "^8.5.12",
+		"tsx": "^4.23.15",
+		"typescript": "^6.0.3"
+	}
+}

@@ -82,9 +82,22 @@ import {
 	STICK_DOT_SIZE,
 	STICK_MAX_TRAVEL,
 	STICK_SIZE,
+	STANDARD_BUTTONS,
 	applyDeadzone,
+	quantize,
+	sameState,
+	sanitizePadState,
 	stickTransform
 } from '../src/lib/shared/pad.ts';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import type { PadMessage } from '../src/lib/shared/types.ts';
+import { WebSocket } from 'ws';
+import { PadHub } from '../src/lib/server/pad-hub.ts';
+import { attachPadWs } from '../src/lib/server/pad-ws.ts';
+import { readState } from '../pad-client/src/sdl.ts';
+import { RemotePadReader } from '../src/lib/client/remote-pad.ts';
+import type { PadSource } from '../src/lib/client/gamepad.ts';
 
 let passed = 0;
 const cases: Array<[string, () => void | Promise<void>]> = [];
@@ -1895,8 +1908,252 @@ test('localDateKey 使用本地时区补零', () => {
 	assert.equal(localDateKey(d.getTime()), '2026-01-05');
 });
 
-/* ============================ 运行 ============================ */
+/* ============================ 手柄通道 ============================ */
 
+test('sanitizePadState：非对象一律拒绝', () => {
+	assert.equal(sanitizePadState(null), null);
+	assert.equal(sanitizePadState(undefined), null);
+	assert.equal(sanitizePadState('x'), null);
+	assert.equal(sanitizePadState(42), null);
+	assert.equal(sanitizePadState([1, 2]), null);
+});
+
+test('sanitizePadState：clamp 数值、补全按键表、丢弃野键名', () => {
+	const s = sanitizePadState({
+		connected: true,
+		id: 'x'.repeat(200),
+		mapping: 'standard',
+		buttons: {
+			A: { pressed: true, value: 5 },
+			LT: { value: 0.5 },
+			/* 不在 STANDARD_BUTTONS 里的键必须被丢掉，否则可以直接往渲染层塞垃圾 */
+			作弊: { pressed: true, value: 1 }
+		},
+		axes: [9, -9, Number.NaN, 0.5]
+	});
+	assert.ok(s);
+	assert.equal(s.id.length, 64);
+	assert.equal(s.mapping, 'standard');
+	assert.equal(s.connected, true);
+	/* value 被 clamp 到 0..1，并顺带把量化后的值点亮成 pressed */
+	assert.equal(s.buttons.A.value, 1);
+	assert.equal(s.buttons.A.pressed, true);
+	assert.equal(s.buttons.LT.value, quantize(0.5));
+	assert.equal(s.buttons.LT.pressed, true);
+	assert.equal(s.buttons['作弊'], undefined);
+	/* 形状必须与 snapshot() 一致：sameState 依赖两边键集合相同 */
+	assert.equal(Object.keys(s.buttons).length, STANDARD_BUTTONS.length);
+	assert.deepEqual(s.axes, [1, -1, 0, quantize(0.5)]);
+	assert.equal(s.pressed, true);
+});
+
+test('sanitizePadState：非法数值归零，不产生 NaN', () => {
+	const s = sanitizePadState({
+		connected: false,
+		buttons: { A: { value: 'x' } },
+		axes: ['a', null, {}, 2]
+	});
+	assert.ok(s);
+	assert.equal(s.buttons.A.value, 0);
+	assert.equal(s.buttons.A.pressed, false);
+	assert.deepEqual(s.axes, [0, 0, 0, 1]);
+	assert.equal(s.connected, false);
+	const again = sanitizePadState({ connected: false, axes: [0, 0, 0, 1] });
+	assert.ok(again);
+	assert.ok(sameState(s, again));
+});
+
+test('readState：SDL 语义名 → 标准键名，扳机同时给 pressed 与 value', () => {
+	const fake = {
+		device: { id: 1, name: 'Fake Pad', type: 'xbox360' },
+		axes: {
+			leftStickX: 0.5,
+			leftStickY: -0.02,
+			rightStickX: 0,
+			rightStickY: 0,
+			leftTrigger: 1,
+			rightTrigger: 0.01
+		},
+		buttons: {
+			a: true,
+			b: false,
+			x: false,
+			y: false,
+			back: false,
+			start: false,
+			guide: true,
+			leftStick: false,
+			rightStick: false,
+			leftShoulder: false,
+			rightShoulder: false,
+			dpadUp: false,
+			dpadDown: false,
+			dpadLeft: false,
+			dpadRight: false
+		},
+		close: () => {}
+	};
+
+	const s = readState(fake as never);
+	assert.equal(s.connected, true);
+	assert.equal(s.id, 'Fake Pad');
+	assert.equal(s.mapping, 'standard');
+	assert.equal(s.buttons.A.pressed, true);
+	assert.equal(s.buttons.A.value, 1);
+	assert.equal(s.buttons.Guide.pressed, true);
+	/* 扳机：1 拉满 → 点亮；0.01 低于阈值 → 不点亮 */
+	assert.equal(s.buttons.LT.pressed, true);
+	assert.equal(s.buttons.LT.value, 1);
+	assert.equal(s.buttons.RT.pressed, false);
+	/* 摇杆：死区先吃掉 -0.02，再量化 */
+	assert.deepEqual(s.axes, [quantize(applyDeadzone(0.5)), 0, 0, 0]);
+	assert.equal(s.pressed, true);
+});
+
+test('readState：全部松开时 pressed 为 false', () => {
+	const buttons = Object.fromEntries(
+		[
+			'a',
+			'b',
+			'x',
+			'y',
+			'back',
+			'start',
+			'guide',
+			'leftStick',
+			'rightStick',
+			'leftShoulder',
+			'rightShoulder',
+			'dpadUp',
+			'dpadDown',
+			'dpadLeft',
+			'dpadRight'
+		].map((k) => [k, false])
+	);
+	const s = readState({
+		device: { id: 1, name: 'Idle', type: null },
+		axes: {
+			leftStickX: 0,
+			leftStickY: 0,
+			rightStickX: 0,
+			rightStickY: 0,
+			leftTrigger: 0,
+			rightTrigger: 0
+		},
+		buttons,
+		close: () => {}
+	} as never);
+	assert.equal(s.connected, true);
+	assert.equal(s.pressed, false);
+});
+
+test('PadHub：广播最新帧，静默超时后由看门狗推 connected:false', async () => {
+	const hub = new PadHub(80);
+	const got: PadMessage[] = [];
+	const off = hub.subscribe((msg) => got.push(msg));
+
+	const first = sanitizePadState({ connected: true, id: 'Pad-X' });
+	assert.ok(first);
+	hub.publish('p1', first, 7);
+	assert.equal(got.length, 1);
+
+	/* 看门狗扫描周期是 500ms，等一轮即可判死 */
+	await new Promise((resolve) => setTimeout(resolve, 700));
+	assert.ok(got.length >= 2, '超时后应当收到判死帧');
+	const last = got.at(-1) as PadMessage;
+	assert.equal(last.state.connected, false);
+	/* 判死时保留设备名，方便看出「是哪只手柄掉的」 */
+	assert.equal(last.state.id, 'Pad-X');
+
+	off();
+	hub.close();
+	assert.deepEqual(hub.snapshot(), []);
+});
+
+test('attachPadWs：口令错误拒绝，正确口令的上报能被订阅者收到', async () => {
+	const server = createServer();
+	const hub = new PadHub();
+	attachPadWs(server, { padHub: hub, token: 'secret' });
+	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+	const port = (server.address() as AddressInfo).port;
+	const base = `ws://127.0.0.1:${port}/ws/pad`;
+
+	/* 口令不对：直接 1008 关掉 */
+	const bad = new WebSocket(`${base}?role=pub&token=wrong`);
+	const badCode = await new Promise<number>((resolve) => bad.on('close', (code) => resolve(code)));
+	assert.equal(badCode, 1008);
+
+	/* 订阅者先接上，再让采集端推一帧 */
+	const sub = new WebSocket(`${base}?slot=p1`);
+	await new Promise((resolve) => sub.on('open', resolve));
+	const frame = new Promise<PadMessage>((resolve) =>
+		sub.on('message', (data) => resolve(JSON.parse(String(data)) as PadMessage))
+	);
+
+	const pub = new WebSocket(`${base}?role=pub&token=secret&slot=p1`);
+	await new Promise((resolve) => pub.on('open', resolve));
+	pub.send(
+		JSON.stringify({
+			t: 'pad',
+			seq: 1,
+			ts: Date.now(),
+			state: {
+				connected: true,
+				id: 'P1',
+				mapping: 'standard',
+				buttons: { A: { pressed: true, value: 1 } },
+				axes: [0, 0, 0, 0]
+			}
+		})
+	);
+
+	const msg = await frame;
+	assert.equal(msg.slot, 'p1');
+	assert.equal(msg.state.connected, true);
+	assert.equal(msg.state.buttons.A?.pressed, true);
+	/* 服务端补全了整张按键表 */
+	assert.equal(Object.keys(msg.state.buttons).length, STANDARD_BUTTONS.length);
+
+	pub.close();
+	sub.close();
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+test('RemotePadReader：收到采集端帧即切到 remote，静默后回到未连接', async () => {
+	const server = createServer();
+	const hub = new PadHub();
+	attachPadWs(server, { padHub: hub, token: 'secret' });
+	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+	const port = (server.address() as AddressInfo).port;
+
+	const reader = new RemotePadReader({
+		slot: 'p1',
+		url: `ws://127.0.0.1:${port}/ws/pad?slot=p1`
+	});
+	const seen: Array<{ connected: boolean; source: PadSource }> = [];
+	const stop = reader.start((state, source) => seen.push({ connected: state.connected, source }));
+
+	/* 等页面这边的 WS 接上，再让「采集端」推一帧 */
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	const live = sanitizePadState({ connected: true, id: 'Remote-1' });
+	assert.ok(live);
+	hub.publish('p1', live, 1);
+	await new Promise((resolve) => setTimeout(resolve, 200));
+
+	assert.equal(seen.at(-1)?.connected, true);
+	assert.equal(seen.at(-1)?.source, 'remote');
+
+	/* 采集端不再上报：服务端看门狗 2s 判死，页面兜底 2.4s 判死，取其一即可 */
+	await new Promise((resolve) => setTimeout(resolve, 2600));
+	assert.equal(seen.at(-1)?.connected, false);
+
+	stop();
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+/* ============================ 运行 ============================ */
 async function run(): Promise<void> {
 	for (const [name, fn] of cases) {
 		try {

@@ -5,10 +5,13 @@
 import { createServer } from 'node:http';
 import { handler } from './build/handler.js';
 import {
+	PadHub,
 	RoomHub,
 	attachDanmakuWs,
+	attachPadWs,
 	loadConfig,
 	registerHub,
+	registerPadHub,
 	setLogLevel
 } from './build/danmaku/entry.js';
 
@@ -26,8 +29,13 @@ const hub = new RoomHub({
 /* 让 /api/health 能访问到同一个 hub 实例 */
 registerHub(hub);
 
+/* 手柄中枢：与房间无关，故独立于 RoomHub */
+const padHub = new PadHub();
+registerPadHub(padHub);
+
 const server = createServer(handler);
 attachDanmakuWs(server, { hub, defaultRoom: config.room });
+attachPadWs(server, { padHub, token: config.padToken });
 
 server.listen(config.port, config.host, () => {
 	const mode = config.mock ? 'MOCK' : 'LIVE';
@@ -49,6 +57,11 @@ server.listen(config.port, config.host, () => {
 	} else {
 		console.log('[live-template] 管理页未开启（设置 LOGIN_TOKEN 可启用）；可用 npm run login 在终端扫码');
 	}
+	if (config.padToken) {
+		console.log('[live-template] 手柄上报已开启: /ws/pad（采集端需带同一 PAD_TOKEN）');
+	} else {
+		console.log('[live-template] 手柄上报未开启（设置 PAD_TOKEN 可启用采集端上报）');
+	}
 	console.log('[live-template] OBS 浏览器源: /?hole=1  (1920x1080)');
 });
 
@@ -59,6 +72,7 @@ async function shutdown(signal) {
 	shuttingDown = true;
 	console.log(`\n[live-template] 收到 ${signal}，正在退出…`);
 	server.close();
+	padHub.close();
 	try {
 		await hub.closeAll();
 	} catch (err) {

@@ -6,6 +6,8 @@
  * lv（UL 等级）、guard（0 无 / 1 总督 / 2 提督 / 3 舰长）、medal（粉丝牌 [名称, 等级]）。
  */
 
+import type { PadState } from './pad';
+
 /** 事件基类：id 由事件总线统一分配，用于断线补发 */
 interface Base {
 	/** 全局自增事件 id */
@@ -150,6 +152,27 @@ export interface PongMessage {
 }
 
 export type ClientMessage = SubscribeMessage | PongMessage;
+
+/* 手柄通道（/ws/pad） */
+
+/**
+ * 手柄状态帧。**上行（采集端 → 服务端）与下行（服务端 → 页面）是同一个形状**，
+ * 页面收到后直接把 `state` 当 PadState 用，不需要再转换。
+ *
+ * 为什么不塞进 `/ws`：`/ws` 是「按房间订阅 + 断线补发」的弹幕通道，pad 与房间无关、
+ * 也不需要补发（只要最新一帧），混进去会让补发水位线和房间生命周期都变复杂。
+ */
+export interface PadMessage {
+	t: 'pad';
+	/** 玩家位，显式绑定，不依赖设备枚举顺序 */
+	slot: string;
+	/** 采集端自增序号，仅用于排障；服务端按 slot 覆盖，不按序号排序 */
+	seq: number;
+	/** 采集端本地毫秒时间戳（仅供展示与排障；看门狗用的是服务端收包时刻，不做时钟同步） */
+	ts: number;
+	/** 已归一化的手柄状态 */
+	state: PadState;
+}
 
 /* 扫码登录 */
 

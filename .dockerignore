@@ -1,0 +1,25 @@
+# 构建上下文只需要「能跑 npm ci + npm run build」的那部分源码。
+#
+# 两个 node_modules 都要排掉：根目录的会被镜像里重新 npm ci，
+# 而 pad-client/ 是**在 Windows 宿主机上跑**的手柄采集端，服务端镜像用不到它 ——
+# 里面还带着 win32 的 .node / .dll，混进 Linux 构建层纯属浪费。
+**/node_modules
+
+# 采集端整体不进镜像
+pad-client
+
+# 生成物在镜像内重新构建
+/build
+/.svelte-kit
+
+# 数据与凭据（容器里由卷挂载）
+/data
+/secrets
+
+# 版本库与本地杂项
+/.git
+/browser-data
+.env
+.env.*
+!/.env.example
+*.log

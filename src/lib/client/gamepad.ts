@@ -11,12 +11,27 @@ import {
 	STANDARD_BUTTONS,
 	applyDeadzone,
 	quantize,
+	sameState,
 	type PadState
 } from '$lib/shared/pad';
 
-export type PadListener = (state: PadState) => void;
+/* sameState 落在 shared/pad.ts：采集端也要用它做「只发变化」，放在 client/ 里跨包取不到 */
+export { sameState };
+
+/**
+ * 手柄数据的来源。
+ *
+ * - `remote`：Windows 采集端经 /ws/pad 上报（OBS 在后台也能用，见 docs/design.md §21）
+ * - `local`：本页通过 Gamepad API 自己读（需要浏览器窗口有焦点）
+ * - `mock`：脚本化的假输入（无手柄的开发环境）
+ */
+export type PadSource = 'remote' | 'local' | 'mock';
+
+export type PadListener = (state: PadState, source: PadSource) => void;
 
 export interface PadReader {
+	/** 本读取器的数据来源，用于 UI 提示与排障 */
+	readonly kind: PadSource;
 	start(onChange: PadListener): () => void;
 }
 
@@ -52,23 +67,10 @@ export function snapshot(pad: Gamepad): PadState {
 	};
 }
 
-/** 判断两份状态是否等价（用于跳过无变化的帧） */
-export function sameState(a: PadState, b: PadState): boolean {
-	if (a.connected !== b.connected || a.pressed !== b.pressed) return false;
-	for (let i = 0; i < 4; i++) {
-		if (a.axes[i] !== b.axes[i]) return false;
-	}
-	for (const name of STANDARD_BUTTONS) {
-		const x = a.buttons[name];
-		const y = b.buttons[name];
-		if (!x || !y) return false;
-		if (x.pressed !== y.pressed || x.value !== y.value) return false;
-	}
-	return true;
-}
-
 /** 真实手柄读取器：rAF 轮询 */
 export class GamepadReader implements PadReader {
+	readonly kind = 'local' as const;
+
 	start(onChange: PadListener): () => void {
 		let raf = 0;
 		let last: PadState = EMPTY_PAD_STATE;
@@ -87,7 +89,7 @@ export class GamepadReader implements PadReader {
 			const next = pad ? snapshot(pad) : EMPTY_PAD_STATE;
 			if (!sameState(last, next)) {
 				last = next;
-				onChange(next);
+				onChange(next, 'local');
 			}
 
 			raf = requestAnimationFrame(tick);

@@ -2,9 +2,11 @@
 	/**
 	 * 手柄调试页 /debug/pad：在 OBS 之外用普通浏览器打开，快速判断「手柄没反应」是
 	 * 设备/驱动、API 还是 OBS 的问题（见 docs/design.md §2.4）。
+	 * 改造后多一层：`来源` 显示数据来自采集端还是本页 API，据此区分「采集端没在跑」
+	 * 与「浏览器读不到」。
 	 */
-	import { GamepadReader } from '$lib/client/gamepad';
-	import { PadMockReader } from '$lib/client/pad-mock';
+	import type { PadSource } from '$lib/client/gamepad';
+	import { createPadReader } from '$lib/client/remote-pad';
 	import { STANDARD_BUTTONS, type PadState } from '$lib/shared/pad';
 	import { page } from '$app/state';
 
@@ -19,6 +21,8 @@
 
 	/* 变量名不能叫 state —— 会与 $state rune 冲突 */
 	let pad = $state<PadState>(EMPTY);
+	/** 数据来源：remote = 采集端上报，local = 本页 Gamepad API */
+	let source = $state<PadSource>('local');
 	/** 是否支持 Gamepad API */
 	let supported = $state(true);
 
@@ -27,9 +31,20 @@
 	$effect(() => {
 		supported = typeof navigator !== 'undefined' && 'getGamepads' in navigator;
 		const useMock = mock;
-		const reader = useMock ? new PadMockReader() : new GamepadReader();
-		return reader.start((s) => (pad = s));
+		const reader = createPadReader({ mock: useMock });
+		return reader.start((s, src) => {
+			pad = s;
+			source = src;
+		});
 	});
+
+	const sourceText = $derived(
+		source === 'remote'
+			? '采集端上报（/ws/pad）'
+			: source === 'mock'
+				? 'mock 脚本'
+				: '本页 Gamepad API'
+	);
 
 	function bar(v: number): string {
 		return `${Math.round(v * 100)}%`;
@@ -49,16 +64,22 @@
 <div class="dbg">
 	<h1>手柄调试 <span class="tag">/debug/pad</span></h1>
 
-	{#if !supported}
-		<p class="warn">当前浏览器不支持 Gamepad API。</p>
+	{#if !supported && source !== 'remote'}
+		<p class="warn">当前浏览器不支持 Gamepad API，且没有采集端在上报。</p>
 	{/if}
 
 	<section>
 		<h2>设备</h2>
 		<dl>
+			<dt>来源</dt>
+			<dd class:ok={source === 'remote'}>{sourceText}</dd>
 			<dt>状态</dt>
 			<dd class:ok={pad.connected} class:bad={!pad.connected}>
-				{pad.connected ? '已检测到手柄' : '未检测到（请按一次手柄上的任意键唤醒）'}
+				{pad.connected
+					? '已检测到手柄'
+					: source === 'remote'
+						? '采集端在线但未检测到手柄'
+						: '未检测到（请按一次手柄上的任意键唤醒）'}
 			</dd>
 			<dt>名称</dt>
 			<dd>{pad.id || '—'}</dd>
@@ -69,6 +90,11 @@
 		</dl>
 		{#if mock}
 			<p class="note">mock 模式：使用脚本化的假输入序列。</p>
+		{:else if source !== 'remote'}
+			<p class="note">
+				当前用的是本页 Gamepad API（需要有焦点的窗口）。要走采集端，请先启动 pad-client，
+				并确认它已连上本服务。
+			</p>
 		{/if}
 	</section>
 
